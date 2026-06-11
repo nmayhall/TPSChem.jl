@@ -1,0 +1,109 @@
+using TPSChem
+using Printf
+using Test
+using JLD2 
+
+if true 
+@testset "He4" begin
+
+    # start with a square, then add some noise to break symmetries
+    molecule = "
+    He  -1.5    0.0     0.0
+    He   1.5    0.0     0.5
+    He   0.0   -1.5     0.0
+    He   0.0    1.5     0.0
+    "
+
+    atoms = []
+    for (li,line) in enumerate(split(rstrip(lstrip(molecule)), "\n"))
+        l = split(line)
+        push!(atoms, Atom(li, l[1], parse.(Float64,l[2:4])))
+    end
+
+
+    clusters    = [(1:5), (6:10), (11:15), (16:20)]
+    init_fspace = [(1, 1), (1, 1), (1, 1), (1, 1)]
+    (na,nb) = sum(init_fspace)
+
+
+    basis = "cc-pvdz"
+    mol     = Molecule(0, 1, atoms, basis)
+
+    # get integrals
+    mf = TPSChem.pyscf_do_scf(mol)
+    display(mf.energy_tot())
+    nbas = size(mf.mo_coeff)[1]
+    ints = TPSChem.pyscf_build_ints(mol,mf.mo_coeff, zeros(nbas,nbas));
+    #e_fci, d1_fci, d2_fci = TPSChem.pyscf_fci(ints, na, nb, conv_tol=1e-10,max_cycle=100, nroots=4, do_rdm1=false, do_rdm2=false);
+    #e_fci_states = [-18.33022092, -18.05457645, -18.02913048, -17.99661028]
+    
+
+    #@test isapprox(mf.energy_tot(), -11.416159557959963, atol=1e-9)
+
+    # localize orbitals
+    C = mf.mo_coeff
+    TPSChem.pyscf_write_molden(mol, C, filename="he4_rhf.molden")
+    Cl = TPSChem.localize(mf.mo_coeff,"lowdin",mf)
+    TPSChem.pyscf_write_molden(mol, Cl, filename="he4_loc.molden")
+    S = TPSChem.get_ovlp(mf)
+    U =  C' * S * Cl
+    
+    println(" Rotate Integrals")
+    flush(stdout)
+    ints = TPSChem.orbital_rotation(ints,U)
+    println(" done.")
+    flush(stdout)
+
+    #
+    # define clusters
+    clusters = [MOCluster(i,collect(clusters[i])) for i = 1:length(clusters)]
+    display(clusters)
+
+
+    #
+    # do CMF
+    d1 = RDM1(n_orb(ints))
+    e_cmf, U, d1  = TPSChem.cmf_oo(ints, clusters, init_fspace, d1, 
+                                       max_iter_oo=60, verbose=0, gconv=1e-10, 
+                                       method="bfgs")
+    ints = TPSChem.orbital_rotation(ints,U)
+    C = Cl*U
+
+    TPSChem.pyscf_write_molden(mol, C, filename="he4_cmf.molden")
+
+    @test isapprox(e_cmf, -11.545601384796, atol=1e-9)
+    @save "_testdata_cmf_he4.jld2" ints d1 e_cmf clusters init_fspace C
+end
+end
+
+@testset "He4_basis" begin
+    
+    @load "_testdata_cmf_he4.jld2" 
+    
+    max_roots = 20
+
+    #
+    # form Cluster data
+    cluster_bases = TPSChem.compute_cluster_eigenbasis(ints, clusters, verbose=0, 
+                                                       max_roots=max_roots, 
+                                                       delta_elec=1,
+                                                       init_fspace=init_fspace, 
+                                                       rdm1a=d1.a, rdm1b=d1.b)
+
+    clustered_ham = TPSChem.extract_ClusteredTerms(ints, clusters)
+    cluster_ops = TPSChem.compute_cluster_ops(cluster_bases, ints);
+    TPSChem.add_cmf_operators!(cluster_ops, cluster_bases, ints, d1.a, d1.b);
+
+    check = 0.0
+    for ci_ops in cluster_ops
+        for (opstr, ops) in ci_ops 
+            for (ftrans, op) in ops 
+                check += sum(abs.(op))
+            end
+        end
+    end
+    println(check)
+    @test isapprox(check, 51116.898762307974, atol=1e-6)
+    @save "_testdata_cmf_he4.jld2" ints C d1 e_cmf clusters init_fspace cluster_bases  clustered_ham cluster_ops
+end
+

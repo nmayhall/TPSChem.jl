@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+TPSChem = "8a527d8e-86ef-4adf-a42d-3ee05015c8b0"
+
+[sources]
+TPSChem = {path = "/Users/nmayhall/code/nmayhall/TPSChem.jl"}

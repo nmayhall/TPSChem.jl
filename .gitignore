@@ -1,0 +1,10 @@
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+docs/site/
+venv/
+__pycache__
+.DS_Store
+Manifest.toml
+docs/Manifest.toml
+docs/build/
