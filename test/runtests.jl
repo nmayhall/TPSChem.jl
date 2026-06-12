@@ -18,5 +18,9 @@ Random.seed!(1234567)
     include("test_openshell.jl")
     include("test_qdpt.jl")
     include("test_variance.jl")
+    include("test_tpsci_rdm2.jl")
+    include("test_tpsci_rdm_bruteforce.jl")
+    include("test_tpsci_rdm_invariants.jl")
+    include("test_tpsci_rdm_threaded.jl")
 end
 

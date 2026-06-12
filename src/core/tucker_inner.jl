@@ -98,22 +98,21 @@ function cache_hamiltonian(bra::BSTstate{T,N,R}, ket::BSTstate{T,N,R}, cluster_o
     #end
 
     keys_to_loop = [keys(clustered_ham.trans)...]
-    
-    # set up scratch arrays
-    nscr = 10 
+
+    # set up scratch arrays — safe with :static scheduler (no task migration)
+    nscr = 10
     scr_f = Vector{Vector{Vector{T}} }()
     for tid in 1:Threads.maxthreadid()
-        tmp = Vector{Vector{T}}() 
+        tmp = Vector{Vector{T}}()
         [push!(tmp, zeros(T,100000)) for i in 1:nscr]
         push!(scr_f, tmp)
     end
-   
-    
+
     if verbose>0
         @printf(" %-50s", " Number of threaded jobs:")
         println(length(keys_to_loop))
     end
-    
+
     Threads.@threads :static for ftrans in keys_to_loop
         scr = scr_f[Threads.threadid()]
         terms = clustered_ham[ftrans]
@@ -261,7 +260,6 @@ function build_sigma_cepa!(sigma_vector::BSTstate{T,N,R}, ci_vector::BSTstate{T,
 
     Threads.@threads for job in jobs
         scr = [zeros(T, 1000) for _ in 1:nscr]   # per-task, no sharing
-
         task_output = []
 
         fock_bra   = job[1]
