@@ -11,6 +11,7 @@ using InteractiveUtils
 abstract type Ansatz end        
 include("type_Solutions.jl");
 include("type_SolverSettings.jl");
+include("Helpers.jl");
 
 
 # Interface Methods: extend each for a new `Ansatz`
@@ -69,6 +70,10 @@ export compute_operator_cca_abb
 export svd_state
 export apply_sminus
 export apply_splus
+
+export generate_cluster_fock_ansatze
+export generate_cluster_fock_ansatze_all
+export invariant_orbital_rotations
 
 export n_elec
 export n_elec_a

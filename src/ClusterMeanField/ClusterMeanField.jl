@@ -13,6 +13,22 @@ using ..ActiveSpaceSolvers
 
 export cmf_ci
 export cmf_oo
+export cmf_oo_gd
+export cmf_oo_diis
+export cmf_oo_newton
+
+export orbital_objective_function
+export orbital_gradient_numerical
+export orbital_hessian_finite_difference
+export orbital_hessian_numerical
+export orbital_hessian_fd_fci_solve
+export orbital_hessian_fd_fci_rdm
+export orbital_hessian_fd_cmf_rdm
+export create_interaction_vector
+export get_global_pair
+export create_projection_vector
+export create_projection_matrix
+export get_rdm
 
 export pyscf_do_scf
 export make_pyscf_mole
@@ -46,5 +62,6 @@ function get_ovlp end
 
 include("incore_cmf.jl")
 include("direct_cmf.jl")
+include("finite_difference.jl")
 
 end
