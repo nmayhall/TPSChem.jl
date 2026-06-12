@@ -11,7 +11,6 @@ using ..InCoreIntegrals
 using Printf
 using ..ActiveSpaceSolvers
 
-export form_1rdm_dressed_ints
 export cmf_ci
 export cmf_oo
 

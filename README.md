@@ -19,11 +19,23 @@ A Julia package for coarse-grained electronic structure calculations in a tensor
 1. `TPSCI` - a generalization of the CIPSI method to a TPS basis. Essentially, one starts with a small number of TPS functions, solves the Schrodinger equation in this small subspace, then uses perturbation theory to determine which TPS's to add to improve the energy. This is done iteratively until the results stop changing. First published [here](https://pubs.acs.org/doi/10.1021/acs.jctc.0c00141).
 1. `BST` - Block Sparse Tucker compression of the TPS wavefunction.
 
-`TPSChem` consolidates what was previously the multi-repo FermiCG ecosystem
-(`FermiCG`, `QCBase`, `InCoreIntegrals`, `BlockDavidson`, `RDM`,
-`ActiveSpaceSolvers`, `ClusterMeanField`) into a single package. Each former
-package lives on as a submodule, e.g. `TPSChem.ActiveSpaceSolvers`,
-`TPSChem.ClusterMeanField`.
+## Package structure
+
+`TPSChem` consolidates what was previously the multi-repo FermiCG ecosystem into a
+single package. Each former package lives on as a submodule with its own README:
+
+| Submodule | Provides | Formerly |
+|---|---|---|
+| [`TPSChem.QCBase`](src/QCBase/README.md) | `Molecule`, `Atom`, `MOCluster`, generic interfaces | QCBase.jl |
+| [`TPSChem.InCoreIntegrals`](src/InCoreIntegrals/README.md) | `InCoreInts` 1-/2-electron integral container | InCoreIntegrals.jl |
+| [`TPSChem.BlockDavidson`](src/BlockDavidson/README.md) | block-Davidson eigensolver (`Davidson`, `eigs`) | BlockDavidson.jl |
+| [`TPSChem.RDM`](src/RDM/README.md) | `RDM1`/`RDM2` types, energies, orbital gradients | RDM.jl |
+| [`TPSChem.ActiveSpaceSolvers`](src/ActiveSpaceSolvers/README.md) | FCI: `FCIAnsatz`, `solve`, `Solution`, RDMs, cluster operators | ActiveSpaceSolvers.jl |
+| [`TPSChem.ClusterMeanField`](src/ClusterMeanField/README.md) | CMF reference states: `cmf_ci`, `cmf_oo` (+ PySCF helpers via extension) | ClusterMeanField.jl |
+
+The TPSCI/BST/CEPA methods themselves live in the top-level `TPSChem` module
+([`src/core/`](src/core)), which re-exports the commonly used names from the
+submodules — `using TPSChem` is all most scripts need.
 
 ## Installation
 
