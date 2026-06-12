@@ -20,11 +20,11 @@ NO-CMF instead solves a **separate CMF-CI for each FockConfig** in a user-chosen
 
 **Level-0 ansatz** (fixed cluster states):
 
-$$
+```math
 |\Psi\rangle = \sum_{f \in F} \sum_{s \in S_f} c_{f,s} \: |\Phi_{f,s}\rangle ,
 \qquad
 |\Phi_{f,s}\rangle = \bigotimes_i |s_i^f\rangle
-$$
+```
 
 where `S_f` is a small set of selected product states (cMF ground product + selected local excitations).
 
@@ -43,12 +43,12 @@ This breaks only when the same FockConfig appears more than once in the expansio
 
 A clustered operator term has the form `T̂ = γ · ô_{i1} ⊗ ô_{i2} ⋯`. Acting between bra block f and ket block f′, its matrix element factors into a contraction over the term's *active* clusters times overlap factors on every *spectator* cluster j:
 
-$$
+```math
 \langle \Phi_f | \hat T | \Phi_{f'} \rangle
 = (\text{active-cluster contraction}) \times \prod_j \sigma_j^{ff'} ,
 \qquad
 \sigma_j^{ff'} = \langle a_j^f | a_j^{f'} \rangle
-$$
+```
 
 The active-cluster factors need transition densities **between two different cluster bases**, e.g. `⟨a_i^f|p̂†|a_i^{f'}⟩`. Rather than computing determinant-level TDMs for every pair of cMF parents, use a shared coordinate system:
 
@@ -56,11 +56,11 @@ The active-cluster factors need transition densities **between two different clu
 2. **Operators once.** Compute standard cluster operator tensors O, with elements `⟨w_m|ô|w_n⟩`, in the working basis with the existing machinery. Done once, shared by all parents.
 3. **Factors.** Each parent's states are exact coefficient columns `U_i^f` (a `d × m_i^f` matrix) in the working basis. All inter-basis quantities are sandwiches:
 
-$$
+```math
 \langle a^f | \hat o | a^{f'} \rangle = U^{f\dagger} O \: U^{f'} ,
 \qquad
 \sigma_i^{ff'} = U_i^{f\dagger} U_i^{f'}
-$$
+```
 
 The spectator overlaps fall out of the same structure (the identity operator transforms to `U^{f†} U^{f'}`). **The working basis is scaffolding only — it never enters the variational space.** Results must be invariant to its construction details (a useful correctness test).
 
@@ -84,17 +84,17 @@ Adding more fixed states per FockConfig converges slowly: the parent cMF states 
 
 Absorbing the CI coefficient into `y = c_g x`, the energy is a ratio of quadratics in y:
 
-$$
+```math
 E(y) = \frac{ y^\dagger A y + 2 v^\dagger y + \kappa }{ y^\dagger y + \rho }
-$$
+```
 
-$$
+```math
 v = \sum_{f \ne g} c_f w_f ,
 \qquad
 \kappa = \sum_{f \ne g} \sum_{f' \ne g} c_f c_{f'} H_{ff'} ,
 \qquad
 \rho = \sum_{f \ne g} c_f^2
-$$
+```
 
 Its minimization is the lowest eigenpair of the bordered (d+1)-dimensional symmetric pencil with matrix rows `(A, v)` and `(v†, κ)` and metric `diag(1, ρ)` — each update relaxes the factor and its CI weight simultaneously. Sweep over all (cluster, FockConfig) pairs; an outer loop re-solves the full NOCI vector c; iterate to convergence. This strictly generalizes the existing `cmf_ci` iteration: with a single FockConfig the resonance terms vanish and it *is* CMF-CI.
 
@@ -122,9 +122,9 @@ A nearly-free upper-level benchmark using only existing machinery: per-FockConfi
 
 Route A's variational space contains every NO-CMF state **whose factors lie in the span of the union basis it was built from**. That covers level 0 and level 1a (subspace relaxation), giving the rigorous chain
 
-$$
+```math
 E(\mathrm{FCI}) \le E(\mathrm{Route\ A}) \le E(\mathrm{level\ 1a}) \le E(\mathrm{level\ 0})
-$$
+```
 
 (with matching TPS counts per FockConfig between levels 1a and 0). **Level 1b is not bounded by the initial Route A**: full relaxation moves the factors outside the original union span, so the only guarantees are variational ones, E(FCI) ≤ E(level 1b) ≤ E(level 1a). To restore a contemporaneous benchmark, rebuild the union basis from the *converged* level-1b factors and rerun TPSCI in it — the gap between that re-built Route A and level 1b then doubles as a convergence diagnostic (it measures the intra-block entanglement that rank growth, §6, would capture).
 
