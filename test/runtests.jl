@@ -22,5 +22,6 @@ Random.seed!(1234567)
     include("test_tpsci_rdm_bruteforce.jl")
     include("test_tpsci_rdm_invariants.jl")
     include("test_tpsci_rdm_threaded.jl")
+    include("test_nocmf.jl")
 end
 
