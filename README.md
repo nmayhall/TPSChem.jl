@@ -4,8 +4,8 @@
 
 # TPSChem.jl
 
-[![Build Status](https://github.com/nmayhall/TPSChem.jl/workflows/CI/badge.svg)](https://github.com/nmayhall/TPSChem.jl/actions)
-[![Coverage](https://codecov.io/gh/nmayhall/TPSChem.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/nmayhall/TPSChem.jl)
+[![Build Status](https://github.com/arnab82/TPSChem.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/arnab82/TPSChem.jl/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/arnab82/TPSChem.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/arnab82/TPSChem.jl)
 
 A Julia package for coarse-grained electronic structure calculations in a tensor product state (TPS) basis.
 
