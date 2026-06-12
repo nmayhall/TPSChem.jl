@@ -49,6 +49,27 @@ using JLD2
     @test all(diff(e1_hist) .<= 1e-9)         # monotone non-increasing
     @test e1 <= e0b[1] + 1e-9                  # at least as good as level 0
     @test eAb[1] <= e1 + 1e-9                  # within the union span, RouteA bounds it
+
+    #
+    # 5) level 2 rank growth: one extra TPS per FockConfig. On h8 with
+    #    max_roots=2 the rank-2 CP expansion saturates the union product space,
+    #    so the energy must land on Route A exactly.
+    blocks, c = nocmf_split_blocks(stateb)
+    e2_hist = nocmf_rank_growth!(blocks, c, envb.cluster_ops, envb.clustered_ham, tol=1e-10)
+    @printf(" h8: E(lvl2)  %12.8f (RouteA %12.8f)\n", e2_hist[end], eAb[1])
+    @test e2_hist[end] <= e1 + 1e-9
+    @test eAb[1] <= e2_hist[end] + 1e-9
+    @test isapprox(e2_hist[end], eAb[1], atol=1e-7)   # saturated CP rank limit
+    @test length(blocks) == 10
+
+    #
+    # 6) level 1b: residual-augmented union — must not rise above 1a, and on
+    #    this system pushes below the *initial* union's Route A bound
+    e1b_hist, _, _ = nocmf_level1b(ints, clusters, fcs, max_roots=2, cycles=3,
+                                   dguess=d1, tol=1e-9)
+    @printf(" h8: E(lvl1b) %12.8f (lvl1a %12.8f)\n", e1b_hist[end], e1)
+    @test e1b_hist[end] <= e1 + 1e-8
+    @test e_fci <= e1b_hist[end] + 1e-9       # still variational
 end
 
 @testset "NO-CMF h12 (5 clusters, spectator overlaps)" begin

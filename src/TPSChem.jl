@@ -149,4 +149,11 @@ export nocmf_routeA
 export nocmf_expectation
 export nocmf_optimize!
 export nocmf_level1a
+export nocmf_level1b
+export nocmf_split_blocks
+export nocmf_blocks_H
+export nocmf_blocks_overlap
+export nocmf_gen_eig
+export nocmf_optimize_blocks!
+export nocmf_rank_growth!
 end

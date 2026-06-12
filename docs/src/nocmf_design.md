@@ -1,6 +1,10 @@
 # NO-CMF: Non-orthogonal CMF state interaction — design document
 
-*Status: draft for discussion; reference implementation in `src/core/nocmf.jl` (level 0 / Route A / level 1a) on the `nocmf` branch.*
+*Status: implemented in `src/core/nocmf.jl` (tests in `test/test_nocmf.jl`). Entry
+points: `nocmf_level0`, `nocmf_routeA`, `nocmf_level1a` (`nocmf_optimize!`),
+`nocmf_level1b`, and level-2 rank growth via `nocmf_split_blocks` +
+`nocmf_rank_growth!` (`nocmf_optimize_blocks!`, `nocmf_gen_eig`). Union-basis
+scaffolding: `build_union_basis` in `src/core/type_ClusterBasis.jl`.*
 
 ## 1. Motivation
 
@@ -142,7 +146,24 @@ Existing pieces (reuse as-is or near):
 | Spin-partner FockConfig generation | `possible_spin_focksectors`, `src/core/type_FockConfig.jl` |
 | PT2 / screening patterns | TPSCI code, `src/core/tpsci_*.jl` |
 
-New pieces: per-FockConfig CMF driver returning cluster `Solution`s; SVD-based union builder; level-0 H build over rank-1 blocks (via SPTstate or a small dedicated dense builder — total dimension is tiny); level-1 ALS sweep (embedded-H + resonance vectors); level-2 greedy rank growth with generalized solve.
+New pieces (all in `src/core/nocmf.jl` unless noted):
+
+| Function | Role |
+|---|---|
+| `nocmf_cmf_solutions` | per-FockConfig CMF-CI + parent cluster eigenbases + embedding RDMs |
+| `build_union_basis` (`type_ClusterBasis.jl`) | SVD-thresholded union working basis + exact parent factors |
+| `nocmf_state` | SPTstate with one Tucker block per FockConfig (`nkeep` truncates block rank) |
+| `nocmf_level0`, `nocmf_ci_solve`, `build_H_dense` | level-0 dense solve |
+| `nocmf_routeA` | union-product-space TPSCI benchmark |
+| `nocmf_optimize!`, `nocmf_level1a` | ALS sweeps via the bordered (d+1) pencil |
+| `nocmf_level1b` | residual-augmented union cycles (embedded-H residual direction) |
+| `nocmf_split_blocks`, `nocmf_optimize_blocks!`, `nocmf_rank_growth!`, `nocmf_gen_eig` | level-2 rank growth, metric-corrected ALS, canonical-orthogonalization generalized solve |
+
+Validated behavior (test/test_nocmf.jl, h8 + h12 fixtures): single-FockConfig
+limit reproduces CMF-CI to machine precision; the bound chain FCI ≤ RouteA ≤
+lvl1a ≤ lvl0 ≤ CMF holds; level-0 energies are invariant to union stacking
+order; ALS is monotone; on h8 (union of 2 states/sector) rank-2 growth
+saturates the union product space and lands on Route A exactly.
 
 ## 9. Open questions
 

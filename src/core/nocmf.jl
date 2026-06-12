@@ -42,6 +42,7 @@ parent's own Fock sectors) in the embedding field of its converged CMF density.
   matching the `cmf_ci` convention)
 - `parent_bases::Vector{Vector{ClusterBasis}}`: outer index = FockConfig
   (parent), inner index = cluster
+- `rdm1s::Vector{RDM1{T}}`: converged CMF embedding density per FockConfig
 """
 function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                              fock_configs::Vector{FockConfig{N}};
@@ -56,6 +57,7 @@ function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
 
     energies = Vector{T}()
     parent_bases = Vector{Vector{ClusterBasis{FCIAnsatz,T}}}()
+    rdm1s = Vector{RDM1{T}}()
 
     for fc in fock_configs
         fspace = [(Int(fc[i][1]), Int(fc[i][2])) for i in 1:N]
@@ -80,8 +82,9 @@ function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                                         T           = T)
         push!(energies, T(e))
         push!(parent_bases, cb)
+        push!(rdm1s, d1)
     end
-    return energies, parent_bases
+    return energies, parent_bases, rdm1s
 end
 
 """
@@ -98,13 +101,13 @@ function nocmf_setup(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                      svd_thresh = 1e-8,
                      verbose    = 0,
                      kwargs...) where {T,N}
-    e_cmf, parent_bases = nocmf_cmf_solutions(ints, clusters, fock_configs;
-                                              max_roots=max_roots, verbose=verbose, kwargs...)
+    e_cmf, parent_bases, rdm1s = nocmf_cmf_solutions(ints, clusters, fock_configs;
+                                                     max_roots=max_roots, verbose=verbose, kwargs...)
     union_bases, factors, recon_err = build_union_basis(parent_bases, svd_thresh=svd_thresh, verbose=verbose)
     recon_err < 1e-6 || @warn(" nocmf_setup: union basis discards parent-state components", recon_err)
     cluster_ops = compute_cluster_ops(union_bases, ints)
     clustered_ham = extract_ClusteredTerms(ints, clusters)
-    return (e_cmf=e_cmf, parent_bases=parent_bases, union_bases=union_bases,
+    return (e_cmf=e_cmf, parent_bases=parent_bases, rdm1s=rdm1s, union_bases=union_bases,
             factors=factors, cluster_ops=cluster_ops, clustered_ham=clustered_ham)
 end
 
@@ -411,6 +414,419 @@ function nocmf_level1a(ints::InCoreInts{T}, clusters::Vector{MOCluster},
     e_hist = nocmf_optimize!(state, env.cluster_ops, env.clustered_ham;
                              max_iter=max_iter, tol=tol, verbose=verbose)
     return e_hist, state, env
+end
+
+"""
+    nocmf_level1b(ints, clusters, fock_configs; max_roots=4, cycles=3, res_thresh=1e-5, ...)
+
+Level-1b: alternate (i) level-1a ALS in the current union working basis with
+(ii) augmentation of the union by residual directions computed in each
+cluster's determinant basis, until the residuals fall below `res_thresh` or
+`cycles` is exhausted. The union span only grows and the converged factors are
+carried over exactly, so the energy is non-increasing across cycles.
+
+The augmentation direction is the *embedded-Hamiltonian* (diagonal-block)
+residual `(H_emb - ε)|x⟩` of each converged factor, projected out of the
+current union span — the resonance contribution to the exact gradient is not
+included in the direction (the subsequent ALS still treats the enlarged space
+fully variationally). Clusters whose determinant dimension exceeds `max_dim_H`
+are skipped.
+
+Returns `(e_hist, state, union_bases)`; energies electronic (no h0). Note the
+final union basis differs from the level-0/1a one — Route A on the *initial*
+union no longer bounds these energies (design doc §7).
+"""
+function nocmf_level1b(ints::InCoreInts{T}, clusters::Vector{MOCluster},
+                       fock_configs::Vector{FockConfig{N}};
+                       max_roots  = 4,
+                       cycles     = 3,
+                       res_thresh = 1e-5,
+                       svd_thresh = 1e-8,
+                       max_iter   = 50,
+                       tol        = 1e-8,
+                       max_dim_H  = 5000,
+                       verbose    = 0,
+                       kwargs...) where {T,N}
+    e_cmf, parent_bases, rdm1s = nocmf_cmf_solutions(ints, clusters, fock_configs;
+                                                     max_roots=max_roots, verbose=verbose, kwargs...)
+    clustered_ham = extract_ClusteredTerms(ints, clusters)
+
+    # residual directions accumulate here as an extra "parent"
+    res_cb = [ClusterBasis(ci, T=T) for ci in clusters]
+    have_res = false
+
+    e_hist = Vector{T}()
+    x_det = nothing       # per FockConfig: converged factors in determinant coordinates
+    c_prev = nothing      # per FockConfig: converged core coefficient
+
+    local state, union_bases, cluster_ops
+    for cycle in 1:cycles
+        stack = have_res ? vcat(parent_bases, [res_cb]) : parent_bases
+        union_bases, factors, _ = build_union_basis(stack, svd_thresh=svd_thresh, verbose=verbose)
+        cluster_ops = compute_cluster_ops(union_bases, ints)
+
+        state = nocmf_state(clusters, fock_configs, factors, union_bases, R=1, nkeep=1)
+        if x_det !== nothing
+            # resume exactly from the previous cycle's converged factors
+            for (p, fc) in enumerate(fock_configs)
+                tc, tk = first(state[fc])
+                newf = ntuple(N) do i
+                    sec = fc[clusters[i].idx]
+                    W = union_bases[i][sec].vectors
+                    u = W' * x_det[p][i]
+                    reshape(u ./ norm(u), size(W, 2), 1)
+                end
+                core = (fill(c_prev[p], ntuple(i -> 1, N)),)
+                state[fc][tc] = Tucker{T,N,1}(core, newf)
+            end
+        end
+
+        eh = nocmf_optimize!(state, cluster_ops, clustered_ham,
+                             max_iter=max_iter, tol=tol, verbose=verbose)
+        append!(e_hist, eh)
+
+        # converged factors in determinant coordinates (for residuals and resume)
+        x_det = Vector{Vector{Vector{T}}}()
+        c_prev = Vector{T}()
+        for (p, fc) in enumerate(fock_configs)
+            tc, tk = first(state[fc])
+            push!(x_det, [union_bases[i][fc[clusters[i].idx]].vectors * tk.factors[i][:, 1] for i in 1:N])
+            push!(c_prev, tk.core[1][1])
+        end
+
+        cycle < cycles || break
+
+        # embedded-Hamiltonian residuals, projected out of the current union
+        maxres = zero(T)
+        for (p, fc) in enumerate(fock_configs)
+            for i in 1:N
+                ci = clusters[i]
+                sec = fc[ci.idx]
+                sol = union_bases[i][sec]
+                sol.ansatz.dim <= max_dim_H || continue
+                W = sol.vectors
+                size(W, 1) > size(W, 2) || continue    # union already spans the sector
+
+                Xd = x_det[p][i]
+                ints_i = subset(ints, ci.orb_list, rdm1s[p].a, rdm1s[p].b)
+                Hm = build_H_matrix(ints_i, sol.ansatz)
+                hx = Hm * Xd
+                r = hx .- dot(Xd, hx) .* Xd
+                r .-= W * (W' * r)
+                nr = norm(r)
+                maxres = max(maxres, nr)
+                nr > res_thresh || continue
+
+                r ./= nr
+                if haskey(res_cb[i], sec)
+                    old = res_cb[i][sec]
+                    vecs = hcat(old.vectors, r)
+                    res_cb[i][sec] = ActiveSpaceSolvers.Solution(sol.ansatz, zeros(T, size(vecs, 2)), vecs)
+                else
+                    res_cb[i][sec] = ActiveSpaceSolvers.Solution(sol.ansatz, zeros(T, 1), reshape(r, :, 1))
+                end
+                have_res = true
+            end
+        end
+        verbose == 0 || @printf(" NO-CMF 1b cycle %2i  E(elec) = %16.10f  max residual = %9.2e\n",
+                                cycle, e_hist[end], maxres)
+        maxres > res_thresh || break
+    end
+    return e_hist, state, union_bases
+end
+
+#####################################################################
+# Level 2: rank growth via repeated FockConfigs (generalized solve)
+#
+# The wavefunction is a list of rank-1 blocks (single-FockConfig SPTstates with
+# unit cores) plus a coefficient vector. FockConfigs may repeat; same-FockConfig
+# blocks are non-orthogonal, so the CI becomes a small generalized eigenproblem
+# solved by canonical orthogonalization.
+#####################################################################
+
+# the single (FockConfig, TuckerConfig, Tucker) of a one-block state
+function _only_block(b::SPTstate{T,N,R}) where {T,N,R}
+    length(b.data) == 1 || error("expected a single-FockConfig block state")
+    fc, tdict = first(b.data)
+    length(tdict) == 1 || error("expected a single TuckerConfig block state")
+    tc, tk = first(tdict)
+    return fc, tc, tk
+end
+
+function _single_block_state(template::SPTstate{T,N,R}, fc::FockConfig{N}, tc::TuckerConfig{N},
+                             tk::Tucker{T,N,R}) where {T,N,R}
+    data = OrderedDict{FockConfig{N},OrderedDict{TuckerConfig{N},Tucker{T,N,R}}}()
+    b = SPTstate{T,N,R}(template.clusters, data, template.p_spaces, template.q_spaces)
+    add_fockconfig!(b, fc)
+    b[fc][tc] = tk
+    return b
+end
+
+"""
+    nocmf_split_blocks(state::SPTstate{T,N,1})
+
+Split a rank-1-block NO-CMF state into a list of normalized single-block basis
+states (cores set to 1) and the corresponding coefficient vector.
+"""
+function nocmf_split_blocks(state::SPTstate{T,N,1}) where {T,N}
+    blocks = Vector{SPTstate{T,N,1}}()
+    coeffs = Vector{T}()
+    for (fc, tdict) in state.data
+        for (tc, tk) in tdict
+            all(size(f, 2) == 1 for f in tk.factors) || error("rank-1 blocks expected")
+            core = (ones(T, ntuple(i -> 1, N)),)
+            push!(blocks, _single_block_state(state, fc, tc, Tucker{T,N,1}(core, deepcopy(tk.factors))))
+            push!(coeffs, tk.core[1][1])
+        end
+    end
+    return blocks, coeffs
+end
+
+"""
+    nocmf_blocks_overlap(blocks)
+
+Overlap matrix between rank-1 basis blocks. Different FockConfigs → exactly 0;
+same FockConfig → product of cluster factor overlaps.
+"""
+function nocmf_blocks_overlap(blocks::Vector{SPTstate{T,N,1}}) where {T,N}
+    nb = length(blocks)
+    S = Matrix{T}(I, nb, nb)
+    for a in 1:nb, b in a+1:nb
+        fca, _, tka = _only_block(blocks[a])
+        fcb, _, tkb = _only_block(blocks[b])
+        fca == fcb || continue
+        s = one(T)
+        for i in 1:N
+            s *= dot(tka.factors[i][:, 1], tkb.factors[i][:, 1])
+        end
+        S[a, b] = s
+        S[b, a] = s
+    end
+    return S
+end
+
+"""
+    nocmf_blocks_H(blocks, cluster_ops, clustered_ham; nbody=4)
+
+Hamiltonian matrix between rank-1 basis blocks (electronic, no h0).
+"""
+function nocmf_blocks_H(blocks::Vector{SPTstate{T,N,1}}, cluster_ops, clustered_ham; nbody=4) where {T,N}
+    nb = length(blocks)
+    H = zeros(T, nb, nb)
+    for a in 1:nb, b in a:nb
+        H[a, b] = _block_H_element(blocks[a], blocks[b], cluster_ops, clustered_ham, nbody=nbody)
+        H[b, a] = H[a, b]
+    end
+    return H
+end
+
+function _block_H_element(a::SPTstate{T,N,1}, b::SPTstate{T,N,1}, cluster_ops, clustered_ham; nbody=4) where {T,N}
+    sig = deepcopy(a)
+    zero!(sig)
+    build_sigma!(sig, b, cluster_ops, clustered_ham, nbody=nbody, verbose=0)
+    return get_vector(sig)[1, 1]
+end
+
+"""
+    nocmf_gen_eig(H, S; lindep_thresh=1e-9)
+
+Generalized symmetric eigenproblem by canonical orthogonalization: overlap
+eigenvectors with eigenvalue below `lindep_thresh` are projected out. Returns
+`(values, vectors, ndropped)` with vectors in the original (non-orthogonal)
+block coordinates, normalized C'SC = 1.
+"""
+function nocmf_gen_eig(H::Matrix{T}, S::Matrix{T}; lindep_thresh=1e-9) where T
+    F = eigen(Symmetric(S))
+    keep = findall(F.values .> lindep_thresh)
+    length(keep) > 0 || error("overlap matrix numerically singular")
+    X = F.vectors[:, keep] * Diagonal(one(T) ./ sqrt.(F.values[keep]))
+    Fh = eigen(Symmetric(X' * H * X))
+    return Fh.values, X * Fh.vectors, size(S, 1) - length(keep)
+end
+
+"""
+    nocmf_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
+                           active=eachindex(blocks), max_iter=20, tol=1e-8, ...)
+
+Metric-corrected ALS over a list of rank-1 blocks with possibly repeated
+FockConfigs. Identical to `nocmf_optimize!` except the bordered pencil's metric
+gains the probe–rest overlap coupling `s_q = ⟨probe_q|rest⟩` (nonzero when other
+blocks share the FockConfig of the block being updated), and the outer CI
+re-solve is generalized. Updates with a near-singular metric are skipped.
+
+`active` restricts which blocks are optimized (e.g. only a freshly added one).
+Mutates `blocks` and `coeffs`; returns the per-sweep energy history.
+"""
+function nocmf_optimize_blocks!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
+                                cluster_ops, clustered_ham;
+                                active        = eachindex(blocks),
+                                max_iter      = 20,
+                                tol           = 1e-8,
+                                lindep_thresh = 1e-9,
+                                verbose       = 0,
+                                nbody         = 4) where {T,N}
+    nb = length(blocks)
+    nb == length(coeffs) || throw(DimensionMismatch)
+
+    H = nocmf_blocks_H(blocks, cluster_ops, clustered_ham, nbody=nbody)
+    S = nocmf_blocks_overlap(blocks)
+    e, C, _ = nocmf_gen_eig(H, S, lindep_thresh=lindep_thresh)
+    coeffs .= C[:, 1]
+
+    e_hist = Vector{T}()
+    push!(e_hist, e[1])
+    verbose == 0 || @printf(" NO-CMF blocks ALS initial E(elec) = %16.10f\n", e_hist[end])
+
+    for iter in 1:max_iter
+        for bidx in active
+            fcg, tcg, tkg = _only_block(blocks[bidx])
+            others = [b2 for b2 in 1:nb if b2 != bidx]
+
+            for j in 1:N
+                d = size(tkg.factors[j], 1)
+
+                pfactors = ntuple(i -> i == j ? Matrix{T}(I, d, d) : tkg.factors[i], N)
+                pcore = (zeros(T, ntuple(i -> i == j ? d : 1, N)),)
+                probe = _single_block_state(blocks[bidx], fcg, tcg, Tucker{T,N,1}(pcore, pfactors))
+
+                A = Matrix(build_H_dense(probe, cluster_ops, clustered_ham, nbody=nbody))
+
+                v = zeros(T, d)
+                sv = zeros(T, d)
+                for b2 in others
+                    sig = deepcopy(probe)
+                    zero!(sig)
+                    build_sigma!(sig, blocks[b2], cluster_ops, clustered_ham, nbody=nbody, verbose=0)
+                    v .+= coeffs[b2] .* get_vector(sig)[:, 1]
+
+                    fcb, _, tkb = _only_block(blocks[b2])
+                    fcb == fcg || continue
+                    ov = one(T)
+                    for i in 1:N
+                        i == j && continue
+                        ov *= dot(tkg.factors[i][:, 1], tkb.factors[i][:, 1])
+                    end
+                    sv .+= coeffs[b2] .* ov .* tkb.factors[j][:, 1]
+                end
+                co = coeffs[others]
+                κ = dot(co, H[others, others] * co)
+                ρ = dot(co, S[others, others] * co)
+
+                if isempty(others)
+                    F = eigen(Symmetric(A))
+                    y = F.vectors[:, 1]
+                    w = one(T)
+                else
+                    M = zeros(T, d + 1, d + 1)
+                    M[1:d, 1:d] .= A
+                    M[1:d, end] .= v
+                    M[end, 1:d] .= v
+                    M[end, end] = κ
+                    Nm = Matrix{T}(I, d + 1, d + 1)
+                    Nm[1:d, end] .= sv
+                    Nm[end, 1:d] .= sv
+                    Nm[end, end] = ρ
+                    eigmin(Symmetric(Nm)) > lindep_thresh || continue   # near-dependent: skip
+
+                    F = eigen(Symmetric(M), Symmetric(Nm))
+                    z = F.vectors[:, 1]
+                    y = z[1:d]
+                    w = z[end]
+                end
+
+                ny = norm(y)
+                ny > 1e-12 || continue
+                newfactors = ntuple(i -> i == j ? reshape(y ./ ny, d, 1) : tkg.factors[i], N)
+                tkg = Tucker{T,N,1}((ones(T, ntuple(i -> 1, N)),), newfactors)
+                blocks[bidx] = _single_block_state(blocks[bidx], fcg, tcg, tkg)
+                coeffs[bidx] = ny
+                coeffs[others] .*= w
+            end
+
+            # refresh this block's H and S rows (off-block entries are unchanged)
+            for b2 in 1:nb
+                H[bidx, b2] = _block_H_element(blocks[bidx], blocks[b2], cluster_ops, clustered_ham, nbody=nbody)
+                H[b2, bidx] = H[bidx, b2]
+            end
+            Srow = nocmf_blocks_overlap(blocks)
+            S[bidx, :] .= Srow[bidx, :]
+            S[:, bidx] .= Srow[:, bidx]
+        end
+
+        e, C, ndrop = nocmf_gen_eig(H, S, lindep_thresh=lindep_thresh)
+        coeffs .= C[:, 1]
+        push!(e_hist, e[1])
+        verbose == 0 || @printf(" NO-CMF blocks ALS sweep %3i  E(elec) = %16.10f  ΔE = %9.2e  (S dropped %i)\n",
+                                iter, e_hist[end], e_hist[end] - e_hist[end-1], ndrop)
+        abs(e_hist[end] - e_hist[end-1]) > tol || break
+    end
+    return e_hist
+end
+
+"""
+    nocmf_rank_growth!(blocks, coeffs, cluster_ops, clustered_ham;
+                       add=nothing, max_iter=20, tol=1e-8, verbose=0, ...)
+
+Level-2 greedy rank growth: for each FockConfig in `add` (default: each block's
+FockConfig once), append a second rank-1 block in that FockConfig — initialized
+from the existing block with its largest-dimension cluster factor replaced by an
+orthogonal direction in the union span — then ALS-optimize the new block with
+all previous blocks frozen, and finish with a global sweep. Exact in the rank
+limit; near-linearly-dependent additions are projected out by the generalized
+solve.
+
+Returns the energy history across additions. Mutates `blocks`/`coeffs`.
+"""
+function nocmf_rank_growth!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
+                            cluster_ops, clustered_ham;
+                            add           = nothing,
+                            max_iter      = 20,
+                            tol           = 1e-8,
+                            lindep_thresh = 1e-9,
+                            verbose       = 0,
+                            nbody         = 4) where {T,N}
+    candidates = add === nothing ? [_only_block(b)[1] for b in blocks] : add
+    e_hist = Vector{T}()
+
+    for fc in candidates
+        # template: the first existing block in this FockConfig
+        tidx = findfirst(b -> _only_block(b)[1] == fc, blocks)
+        tidx === nothing && error("no existing block for FockConfig $fc to grow from")
+        _, tc, tk = _only_block(blocks[tidx])
+
+        # orthogonal initialization on the largest-dimension cluster
+        ds = [size(tk.factors[i], 1) for i in 1:N]
+        j = argmax(ds)
+        if ds[j] == 1
+            verbose == 0 || @printf(" nocmf_rank_growth!: no room to grow FockConfig %s — skipped\n", string(fc))
+            continue
+        end
+        x = tk.factors[j][:, 1]
+        xnew = zeros(T, ds[j])
+        for q in 1:ds[j]
+            eq = zeros(T, ds[j])
+            eq[q] = one(T)
+            xnew .= eq .- x .* dot(x, eq)
+            norm(xnew) > 0.1 && break
+        end
+        xnew ./= norm(xnew)
+        newfactors = ntuple(i -> i == j ? reshape(xnew, ds[j], 1) : deepcopy(tk.factors[i]), N)
+        newblock = _single_block_state(blocks[tidx], fc, tc,
+                                       Tucker{T,N,1}((ones(T, ntuple(i -> 1, N)),), newfactors))
+        push!(blocks, newblock)
+        push!(coeffs, zero(T))
+
+        # optimize the new block with the others frozen, then a global polish
+        eh = nocmf_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
+                                    active=[length(blocks)], max_iter=max_iter, tol=tol,
+                                    lindep_thresh=lindep_thresh, verbose=verbose, nbody=nbody)
+        append!(e_hist, eh)
+        eh = nocmf_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
+                                    max_iter=max_iter, tol=tol,
+                                    lindep_thresh=lindep_thresh, verbose=verbose, nbody=nbody)
+        append!(e_hist, eh)
+    end
+    return e_hist
 end
 
 """
