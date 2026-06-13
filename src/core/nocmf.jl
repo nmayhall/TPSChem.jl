@@ -38,12 +38,18 @@ Converge a CMF-CI (no orbital optimization) for each FockConfig in
 parent's own Fock sectors) in the embedding field of its converged CMF density.
 
 `spin_avg=true` (default) symmetrizes the embedding density (`d1.a == d1.b`),
-matching the standard CMF behavior. Pass `spin_avg=false` to allow the mean
-field to spin-polarize — natural for NO-CMF when a FockConfig places an odd
-number of electrons on a cluster, letting spectators relax to the broken-
-symmetry density. As with any CMF, the broken-symmetry solution can be guess-
-dependent (`dguess`); the option chains through `nocmf_setup`/`nocmf_level0`/
-`nocmf_level1a`/`nocmf_level1b`.
+matching the standard CMF behavior.
+
+!!! warning "spin_avg=false is not yet a true broken-symmetry CMF"
+    The option chains through to `cmf_ci`, but the embedded cluster Hamiltonian
+    is still spin-averaged: `subset` and the FCI solver use a single one-body
+    operator `J(da+db) - ½K(da) - ½K(db)` for both spins, dropping the spin-
+    dependent exchange `½K(da-db)`. So a cluster never sees a spin-polarized
+    mean field, the resulting "BS" state does not variationally minimize, and
+    `E_BS` is not guaranteed to lower-bound the spin-averaged energy. Genuine
+    BS-CMF needs a spin-resolved embedded FCI (`h1a`/`h1b`) in
+    `ActiveSpaceSolvers` — left for a future implementation. `spin_avg=false`
+    emits a one-time warning.
 
 # Returns
 - `energies::Vector{T}`: CMF-CI energy per FockConfig (includes `ints.h0`,

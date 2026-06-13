@@ -229,6 +229,16 @@ function cmf_ci(ints, clusters, fspace, in_rdm1::RDM1;
                 verbose     = 1,
                 sequential  = false,
                 spin_avg    = true)
+    if !spin_avg
+        @warn(" cmf_ci(spin_avg=false): the embedded cluster Hamiltonian is still " *
+              "spin-averaged (subset() and the FCI solver use a single one-body " *
+              "operator: J(da+db) - ½K(da) - ½K(db), applied to both spins). The " *
+              "spin-dependent exchange ½K(da-db) is dropped, so this is NOT a true " *
+              "broken-symmetry CMF — it does not variationally minimize the BS state " *
+              "and E_BS is not guaranteed to lower-bound the spin-averaged energy. " *
+              "A spin-resolved embedded FCI is needed for genuine BS-CMF.",
+              maxlog=1)
+    end
     rdm1 = deepcopy(in_rdm1)
     energies = []
     e_prev = 0
