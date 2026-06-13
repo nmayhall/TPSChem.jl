@@ -221,13 +221,14 @@ Optimize the 1RDM for CMF-CI
 - `rdm1_dict`: Dictionary of 1RDMs; cluster index --> RDM1
 - `rdm2_dict`: Dictionary of 2RDMs; cluster index --> RDM2
 """
-function cmf_ci(ints, clusters, fspace, in_rdm1::RDM1; 
-                maxiter_ci  = 100, 
-                maxiter_d1  = 20, 
-                tol_d1      = 1e-6, 
-                tol_ci      = 1e-8, 
+function cmf_ci(ints, clusters, fspace, in_rdm1::RDM1;
+                maxiter_ci  = 100,
+                maxiter_d1  = 20,
+                tol_d1      = 1e-6,
+                tol_ci      = 1e-8,
                 verbose     = 1,
-                sequential  = false)
+                sequential  = false,
+                spin_avg    = true)
     rdm1 = deepcopy(in_rdm1)
     energies = []
     e_prev = 0
@@ -244,17 +245,24 @@ function cmf_ci(ints, clusters, fspace, in_rdm1::RDM1;
             println(" CMF CI Iter: ", iter)
             println(" ------------------------------------------ ")
         end
-        e_curr, rdm1_dict, rdm2_dict = cmf_ci_iteration(ints, clusters, rdm1, fspace, 
+        e_curr, rdm1_dict, rdm2_dict = cmf_ci_iteration(ints, clusters, rdm1, fspace,
                                                         maxiter_ci  = maxiter_ci,
                                                         tol_ci      = tol_ci,
                                                         verbose     = verbose,
-                                                        sequential  = sequential
+                                                        sequential  = sequential,
+                                                        spin_avg    = spin_avg
                                                        )
         rdm1_curr = assemble_full_rdm(clusters, rdm1_dict)
 
         append!(energies,e_curr)
+        # converge on the charge density; when spin averaging is off the spin
+        # density (a-b) carries the broken-symmetry polarization, so include it
         error = (rdm1_curr.a+rdm1_curr.b) - (rdm1.a+rdm1.b)
         d_err = norm(error)
+        if !spin_avg
+            spin_err = (rdm1_curr.a-rdm1_curr.b) - (rdm1.a-rdm1.b)
+            d_err = max(d_err, norm(spin_err))
+        end
         e_err = e_curr-e_prev
         if verbose>1
             @printf(" CMF-CI Energy: %12.8f | Change: RDM: %6.1e Energy %6.1e\n\n", e_curr, d_err, e_err)

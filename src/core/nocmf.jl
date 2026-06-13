@@ -37,6 +37,14 @@ Converge a CMF-CI (no orbital optimization) for each FockConfig in
 `fock_configs` and build that parent's cluster eigenbases (restricted to the
 parent's own Fock sectors) in the embedding field of its converged CMF density.
 
+`spin_avg=true` (default) symmetrizes the embedding density (`d1.a == d1.b`),
+matching the standard CMF behavior. Pass `spin_avg=false` to allow the mean
+field to spin-polarize — natural for NO-CMF when a FockConfig places an odd
+number of electrons on a cluster, letting spectators relax to the broken-
+symmetry density. As with any CMF, the broken-symmetry solution can be guess-
+dependent (`dguess`); the option chains through `nocmf_setup`/`nocmf_level0`/
+`nocmf_level1a`/`nocmf_level1b`.
+
 # Returns
 - `energies::Vector{T}`: CMF-CI energy per FockConfig (includes `ints.h0`,
   matching the `cmf_ci` convention)
@@ -52,7 +60,8 @@ function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                              maxiter_d1 = 40,
                              tol_d1     = 1e-7,
                              tol_ci     = 1e-9,
-                             sequential = false) where {T,N}
+                             sequential = false,
+                             spin_avg   = true) where {T,N}
     length(clusters) == N || throw(DimensionMismatch("clusters vs FockConfig length"))
 
     energies = Vector{T}()
@@ -69,7 +78,8 @@ function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                                                   tol_d1     = tol_d1,
                                                   tol_ci     = tol_ci,
                                                   verbose    = verbose,
-                                                  sequential = sequential)
+                                                  sequential = sequential,
+                                                  spin_avg   = spin_avg)
         d1 = ClusterMeanField.assemble_full_rdm(clusters, rdm1_dict)
 
         cb = compute_cluster_eigenbasis(ints, clusters,
