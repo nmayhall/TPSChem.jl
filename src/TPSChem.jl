@@ -92,6 +92,8 @@ include("core/tpsci_outer.jl")
 include("core/tpsci_helpers.jl")
 include("core/tpsci.jl")
 
+include("core/nocmf.jl")
+
 include("core/dense_inner.jl")
 include("core/dense_outer.jl")
 include("core/spt_variance.jl")
@@ -137,4 +139,21 @@ export print_stick_spectrum
 export compute_2rdm
 export compute_2rdm_threaded
 export compute_2rdm_blas
+export build_union_basis
+export nocmf_cmf_solutions
+export nocmf_setup
+export nocmf_state
+export nocmf_ci_solve
+export nocmf_level0
+export nocmf_routeA
+export nocmf_expectation
+export nocmf_optimize!
+export nocmf_level1a
+export nocmf_level1b
+export nocmf_split_blocks
+export nocmf_blocks_H
+export nocmf_blocks_overlap
+export nocmf_gen_eig
+export nocmf_optimize_blocks!
+export nocmf_rank_growth!
 end

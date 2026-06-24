@@ -9,6 +9,7 @@ pages = [
     # "Problem" => "problem.md",
     # "GPU" => "gpu.md",
     "Examples" => ["cmf.md","fci.md"],
+    "Design notes" => ["nocmf_design.md"],
 #    "Library" => [
 #        "Contents" => "library/outline.md",
 #        "Public" => "library/public.md",
