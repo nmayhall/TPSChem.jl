@@ -51,7 +51,7 @@ function Davidson(op;
 
     size(op)[1] == size(op)[2] || throw(DimensionMismatch)
     dim = size(op)[1]
-    if v0==nothing
+    if v0===nothing
         F = qr(rand(T, dim,nroots))
         v0 = Matrix(F.Q)
     else
@@ -93,7 +93,7 @@ issymmetric(lop::LinOpMat{T}) where {T} = return lop.sym
 
 
 
-function print_iter(solver::Davidson)
+function print_iter(solver::Davidson{T}) where T<:Real
     @printf(" Iter: %3i SS: %-4i", solver.iter_curr, size(solver.vec_prev)[2])
     @printf(" E: ")
     for i in 1:solver.nroots
@@ -113,6 +113,30 @@ function print_iter(solver::Davidson)
     end
     @printf(" LinDep: ")
     @printf("%5.1e* ", solver.lindep)
+    println("")
+    flush(stdout)
+end
+
+function print_iter(solver::Davidson{T}) where T<:Complex
+    @printf(" Iter: %3i SS: %-4i", solver.iter_curr, size(solver.vec_prev)[2])
+    @printf(" E: ")
+    for i in 1:solver.nroots
+        if solver.status[i]
+            @printf("%13.8f %13.8fim* ", real(solver.ritz_e[i]), imag(solver.ritz_e[i]))
+        else
+            @printf("%13.8f %13.8fim  ", real(solver.ritz_e[i]), imag(solver.ritz_e[i]))
+        end
+    end
+    @printf(" R: ")
+    for i in 1:solver.nroots
+        if solver.status[i]
+            @printf("%5.1e* ", abs(solver.resid[i]))
+        else
+            @printf("%5.1e  ", abs(solver.resid[i]))
+        end
+    end
+    @printf(" LinDep: ")
+    @printf("%5.1e* ", abs(solver.lindep))
     println("")
     flush(stdout)
 end
@@ -159,7 +183,7 @@ function iteration(solver::Davidson; Adiag=nothing, iprint=0, precond_start_thre
     # form H in current subspace
     Hss = solver.vec_prev' * solver.sig_prev
     F = eigen(Hss)
-    idx = sortperm(F.values)
+    idx = sortperm([(real(i), imag(i)) for i in F.values])
 
     ss_size = min(size(solver.vec_prev,2), solver.max_ss_vecs)
     
@@ -190,7 +214,7 @@ function iteration(solver::Davidson; Adiag=nothing, iprint=0, precond_start_thre
         else
             solver.status[s] = false 
         end
-        if Adiag != nothing && solver.status[s] == false && solver.resid[s] < precond_start_thresh 
+        if Adiag !== nothing && solver.status[s] == false && solver.resid[s] < precond_start_thresh
         # if Adiag != nothing && solver.status[s] == false
             tmp = deepcopy(res)
             for i in 1:length(Adiag)
@@ -226,16 +250,16 @@ function eigs(solver::Davidson; Adiag=nothing, iprint=0, precond_start_thresh=1e
             break
         end
         if solver.lindep > solver.lindep_thresh && iter < solver.max_iter
-            @warn "Linear dependency detected. Restarting."
+            println(" Linear dependency detected. Restarting.")
             flush(stdout)
             F = qr(solver.vec_prev[:,1:solver.nroots])
             solver.vec_curr = Matrix(F.Q)
             solver.sig_curr = Matrix(F.Q)
-            solver.vec_prev = zeros(solver.dim, 0) 
-            solver.sig_prev =  zeros(solver.dim, 0)
-            solver.ritz_v = zeros(solver.nroots,solver.nroots)
-            solver.ritz_e = zeros(solver.nroots)
-            solver.resid = zeros(solver.nroots)
+            solver.vec_prev = zeros(eltype(solver.vec_prev), solver.dim, 0)
+            solver.sig_prev = zeros(eltype(solver.sig_prev), solver.dim, 0)
+            solver.ritz_v = zeros(eltype(solver.ritz_v), solver.nroots, solver.nroots)
+            solver.ritz_e = zeros(eltype(solver.ritz_e), solver.nroots)
+            solver.resid  = zeros(eltype(solver.resid),  solver.nroots)
         end
     end
     return solver.ritz_e[1:solver.nroots], solver.vec_prev[:,1:solver.nroots]

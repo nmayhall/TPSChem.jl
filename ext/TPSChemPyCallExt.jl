@@ -31,11 +31,15 @@ import TPSChem.ClusterMeanField: pyscf_do_scf,
 
 include("PyscfFunctions.jl")
 
-function pyscf_fci_rdm12s(ints_i::InCoreInts, na, nb, tol_ci, maxiter_ci)
+function pyscf_fci_rdm12s(ints_i::InCoreInts, na, nb, tol_ci, maxiter_ci; use_nosym=false)
     pyscf = pyimport("pyscf")
     pyimport("pyscf.fci")
     no = n_orb(ints_i)
-    cisolver = pyscf.fci.direct_spin1.FCI()
+    if use_nosym
+        cisolver = pyscf.fci.direct_nosym.FCI()
+    else
+        cisolver = pyscf.fci.direct_spin1.FCI()
+    end
     cisolver.max_cycle = maxiter_ci
     cisolver.conv_tol = tol_ci
     cisolver.conv_tol_residual = tol_ci

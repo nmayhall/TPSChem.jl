@@ -22,5 +22,9 @@ Random.seed!(1234567)
     include("test_tpsci_rdm_bruteforce.jl")
     include("test_tpsci_rdm_invariants.jl")
     include("test_tpsci_rdm_threaded.jl")
+    include("test_upstream_packages.jl")
+    include("test_absorption_spectrum.jl")
+    include("test_tpsci_helpers.jl")
+    include("test_spt_helpers.jl")
+    include("test_direct_cmf.jl")
 end
-
