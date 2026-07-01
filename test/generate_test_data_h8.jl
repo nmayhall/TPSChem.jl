@@ -42,8 +42,10 @@ function generate_h8_data()
     println(" done.")
     flush(stdout)
 
-    clusters    = [(1:4),(5:8)]
-    init_fspace = [(2,2),(2,2)]
+    # clusters    = [(1:4),(5:8)]
+    # init_fspace = [(2,2),(2,2)]
+    clusters    = [(1:2),(3:4),(5:6),(7:8)]
+    init_fspace = [(1,1),(1,1),(1,1),(1,1)]
 
     clusters = [MOCluster(i,collect(clusters[i])) for i = 1:length(clusters)]
     display(clusters)

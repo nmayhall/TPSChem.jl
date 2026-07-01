@@ -1,16 +1,16 @@
-# NO-CMF: Non-orthogonal CMF state interaction — design document
+# Oxidation-State CI: a CI over oxidation states with context-specific cluster bases — design document
 
-*Status: implemented in `src/core/nocmf.jl` (tests in `test/test_nocmf.jl`). Entry
-points: `nocmf_level0`, `nocmf_routeA`, `nocmf_level1a` (`nocmf_optimize!`),
-`nocmf_level1b`, and level-2 rank growth via `nocmf_split_blocks` +
-`nocmf_rank_growth!` (`nocmf_optimize_blocks!`, `nocmf_gen_eig`). Union-basis
+*Status: implemented in `src/core/oxci.jl` (tests in `test/test_oxci.jl`). Entry
+points: `oxci_solve`, `oxci_union_benchmark`, `oxci_variational` (`oxci_variational_sweep!`),
+`oxci_variational_relax`, and Method B (rank growth) rank growth via `oxci_split_blocks` +
+`oxci_rank_growth!` (`oxci_optimize_blocks!`, `oxci_gen_eig`). Union-basis
 scaffolding: `build_union_basis` in `src/core/type_ClusterBasis.jl`.*
 
 ## 1. Motivation
 
 TPSCI builds one orthonormal cluster basis per cluster and expands in product configurations. The cluster states are computed in a *single* mean-field environment (one FockConfig), so describing charge-transfer or locally-excited FockConfigs well requires many cluster states — the basis is not adapted to each Fock sector's environment.
 
-NO-CMF instead solves a **separate CMF-CI for each FockConfig** in a user-chosen list, so every FockConfig gets cluster states polarized by *its own* environment, and couples a few tensor product states (TPS) per FockConfig in a small CI problem. The aim is a compact, interpretable wavefunction — (number of FockConfigs) × (a few states) rather than a product space — analogous to NOCI over cMF states, but with shared orthonormal orbitals.
+Oxidation-State CI instead solves a **separate CMF-CI for each FockConfig** in a user-chosen list, so every FockConfig gets cluster states polarized by *its own* environment, and couples a few tensor product states (TPS) per FockConfig in a small CI problem. The aim is a compact, interpretable wavefunction — (number of FockConfigs) × (a few states) rather than a product space — analogous to NOCI over cMF states, but with shared orthonormal orbitals.
 
 ## 2. Definitions and ansatz
 
@@ -18,7 +18,7 @@ NO-CMF instead solves a **separate CMF-CI for each FockConfig** in a user-chosen
 - A FockConfig f assigns (nα, nβ) to each cluster. The user supplies a list F (neutral, CT, spin-flipped, locally ionized, ...).
 - For each f in F: converge CMF-CI at fixed f (cluster FCI in the mean field of the other clusters' RDMs, iterated to self-consistency; no orbital rotation). Keep `m_i^f` eigenstates `|s_i^f⟩` per cluster.
 
-**Level-0 ansatz** (fixed cluster states):
+**Method A ansatz** (fixed cluster states):
 
 ```math
 |\Psi\rangle = \sum_{f \in F} \sum_{s \in S_f} c_{f,s} \: |\Phi_{f,s}\rangle ,
@@ -35,9 +35,9 @@ Because all FockConfigs share one orthonormal MO basis:
 - f ≠ f′: the configs differ in (nα, nβ) on at least one cluster, whose states are then orthogonal by particle number, so `⟨Φ_{f,s}|Φ_{f',s'}⟩ = 0` **exactly**.
 - f = f′: the TPS are products of one CMF solution's orthonormal cluster eigenstates, hence orthonormal.
 
-**Therefore S = 1 globally and the level-0/1 CI is a standard (not generalized) eigenproblem.** The "non-orthogonality" lives entirely inside Hamiltonian matrix elements: cluster states with the same sector but different cMF parents overlap nontrivially, so *spectator clusters contribute overlap matrices instead of Kronecker deltas*.
+**Therefore S = 1 globally and the Method A/1 CI is a standard (not generalized) eigenproblem.** The "non-orthogonality" lives entirely inside Hamiltonian matrix elements: cluster states with the same sector but different cMF parents overlap nontrivially, so *spectator clusters contribute overlap matrices instead of Kronecker deltas*.
 
-This breaks only when the same FockConfig appears more than once in the expansion (level 2, §6) — then S ≠ 1 within that block and the small eigenproblem becomes generalized. It also breaks if orbitals are ever relaxed per FockConfig (non-orthogonal orbitals require NOCI-grade matrix-element machinery); we exclude that by design.
+This breaks only when the same FockConfig appears more than once in the expansion (Method B (rank growth), §6) — then S ≠ 1 within that block and the small eigenproblem becomes generalized. It also breaks if orbitals are ever relaxed per FockConfig (non-orthogonal orbitals require NOCI-grade matrix-element machinery); we exclude that by design.
 
 ## 4. Matrix elements via a union working basis
 
@@ -64,15 +64,15 @@ The active-cluster factors need transition densities **between two different clu
 
 The spectator overlaps fall out of the same structure (the identity operator transforms to `U^{f†} U^{f'}`). **The working basis is scaffolding only — it never enters the variational space.** Results must be invariant to its construction details (a useful correctness test).
 
-Each TPS block is exactly a Tucker block: core = CI coefficients over kept local states, factors = `U_i^f`. This is the existing `SPTstate` structure with one block per FockConfig, whose factors come from that FockConfig's cMF instead of an HOSVD. Blocks in distinct FockConfigs are mutually orthogonal, so the existing orthogonal SPT solve applies at level 0.
+Each TPS block is exactly a Tucker block: core = CI coefficients over kept local states, factors = `U_i^f`. This is the existing `SPTstate` structure with one block per FockConfig, whose factors come from that FockConfig's cMF instead of an HOSVD. Blocks in distinct FockConfigs are mutually orthogonal, so the existing orthogonal SPT solve applies at Method A.
 
 **Can the SPT machinery really be reused with non-orthogonal cross-block factors?** Verified in the source (a natural worry, since Tucker factors are "orthonormal" by construction):
 
 - The H build does **not** assume cross-block factor overlaps are δ. `contract_dense_H_with_state` explicitly forms spectator overlaps `S = coeffs_bra.factors[ci]' * coeffs_ket.factors[ci]` and applies them to the ket core (`src/core/tucker_contract_dense_H_with_state.jl:89-105`, comment: *"needed when TuckerConfigs aren't the same because each does their own compression and has distinct Tucker factors"*). Active clusters are sandwiched `U' O U` in `build_dense_H_term` (`src/core/tucker_build_dense_H_term.jl:14,34-48`). This is exactly the §4 sandwich structure.
-- What **is** assumed, and holds for NO-CMF: (i) orthonormal *columns* within each block's factors — true, each cMF's kept states are orthonormal vectors in the working basis — used by `orth_dot` norms; (ii) spectator clusters must have matching `TuckerConfig` ranges (`check_term`, `src/core/type_ClusteredTerm.jl:100-105`) — satisfied by giving every block the full union-sector range.
-- Caution: compression (HOSVD) and PT2 code paths may carry stronger orthonormality assumptions and must be audited before reuse; the level-0 build/solve path (`build_sigma!`, `form_sigma_block!`) does not.
+- What **is** assumed, and holds for Oxidation-State CI: (i) orthonormal *columns* within each block's factors — true, each cMF's kept states are orthonormal vectors in the working basis — used by `orth_dot` norms; (ii) spectator clusters must have matching `TuckerConfig` ranges (`check_term`, `src/core/type_ClusteredTerm.jl:100-105`) — satisfied by giving every block the full union-sector range.
+- Caution: compression (HOSVD) and PT2 code paths may carry stronger orthonormality assumptions and must be audited before reuse; the Method A build/solve path (`build_sigma!`, `form_sigma_block!`) does not.
 
-## 5. Level 1: resonating CMF (variational factor optimization)
+## 5. Method B: resonating CMF (variational factor optimization)
 
 Adding more fixed states per FockConfig converges slowly: the parent cMF states are optimal for their own diagonal block but know nothing about coupling. The efficient improvement is to **optimize the cluster states defining each TPS in the presence of the others** — the cluster analog of resonating HF (Fukutome) / few-determinant projected-HF chains (Scuseria). Take one TPS per FockConfig, `|Φ_f⟩ = ⊗_i |x_i^f⟩`, and minimize the lowest NOCI root over all factors.
 
@@ -105,28 +105,28 @@ Its minimization is the lowest eigenpair of the bordered (d+1)-dimensional symme
 
 **Structural gift:** factors in different FockConfigs stay exactly orthogonal *no matter how they are optimized* (particle number). The classic resonating-HF pathologies — states collapsing onto each other, singular overlap — cannot occur across FockConfigs; S = 1 survives the whole optimization.
 
-**Initial guess:** the level-0 fixed cMF states. Levels 0 and 1 share one code path; level 0 is iteration zero of level 1.
+**Initial guess:** the Method A fixed cMF states. Levels 0 and 1 share one code path; Method A is iteration zero of Method B.
 
-## 6. Level 2: systematic convergence
+## 6. Method B (rank growth): systematic convergence
 
 Even optimized, one TPS per FockConfig carries zero inter-cluster entanglement *within* its block. Two complementary knobs:
 
 1. **Rank growth via repeated FockConfigs (CP-style).** Add a second, independently optimized TPS in the same FockConfig — greedily: optimize the new TPS in the presence of the frozen previous ones (the resonating-chain / FED recipe), then optionally a global re-sweep. Exact in the rank limit. Within a repeated FockConfig S ≠ 1: the (small) NOCI eigenproblem becomes generalized; monitor its condition number and discard rank additions that approach linear dependence.
-2. **PT2 diagnostics and correction.** Epstein–Nesbet PT2 over the union product space (the Route-A space of §7) on top of the converged reference: estimates the residual error, and its per-FockConfig / per-sector decomposition tells you *which* FockConfig to add to the list or where to grow rank next. Reuses TPSCI screening/PT2 logic.
+2. **PT2 diagnostics and correction.** Epstein–Nesbet PT2 over the union product space (the union-product benchmark space of §7) on top of the converged reference: estimates the residual error, and its per-FockConfig / per-sector decomposition tells you *which* FockConfig to add to the list or where to grow rank next. Reuses TPSCI screening/PT2 logic.
 
-**Spin.** Fixed (nα, nβ) per cluster breaks Ŝ². Mitigations, in order of rigor: (i) always include each FockConfig's spin-flip partners in the list (`possible_spin_focksectors` exists) and keep cluster multiplets intact when truncating; (ii) at level 1, tie/state-average factors across spin-partner FockConfigs; (iii) check ⟨Ŝ²⟩ of NOCI roots as a diagnostic. **Excited states:** state-average the level-1 objective over the lowest few NOCI roots.
+**Spin.** Fixed (nα, nβ) per cluster breaks Ŝ². Mitigations, in order of rigor: (i) always include each FockConfig's spin-flip partners in the list (`possible_spin_focksectors` exists) and keep cluster multiplets intact when truncating; (ii) at Method B, tie/state-average factors across spin-partner FockConfigs; (iii) check ⟨Ŝ²⟩ of NOCI roots as a diagnostic. **Excited states:** state-average the Method B objective over the lowest few NOCI roots.
 
-## 7. Validation strategy (Route A benchmark)
+## 7. Validation strategy (union-product benchmark benchmark)
 
 A nearly-free upper-level benchmark using only existing machinery: per-FockConfig `cmf_ci`, then union ClusterBasis (`merge_cluster_bases(augment=true)`, upgraded QR to SVD), then **standard TPSCI over the full product space of the union basis** restricted to the listed FockConfigs.
 
-Route A's variational space contains every NO-CMF state **whose factors lie in the span of the union basis it was built from**. That covers level 0 and level 1a (subspace relaxation), giving the rigorous chain
+union-product benchmark's variational space contains every Oxidation-State CI state **whose factors lie in the span of the union basis it was built from**. That covers Method A and Method B (subspace relaxation) (subspace relaxation), giving the rigorous chain
 
 ```math
 E(\mathrm{FCI}) \le E(\mathrm{Route\ A}) \le E(\mathrm{level\ 1a}) \le E(\mathrm{level\ 0})
 ```
 
-(with matching TPS counts per FockConfig between levels 1a and 0). **Level 1b is not bounded by the initial Route A**: full relaxation moves the factors outside the original union span, so the only guarantees are variational ones, E(FCI) ≤ E(level 1b) ≤ E(level 1a). To restore a contemporaneous benchmark, rebuild the union basis from the *converged* level-1b factors and rerun TPSCI in it — the gap between that re-built Route A and level 1b then doubles as a convergence diagnostic (it measures the intra-block entanglement that rank growth, §6, would capture).
+(with matching TPS counts per FockConfig between levels 1a and 0). **Method B (full relaxation) is not bounded by the initial union-product benchmark**: full relaxation moves the factors outside the original union span, so the only guarantees are variational ones, E(FCI) ≤ E(Method B (full relaxation)) ≤ E(Method B (subspace relaxation)). To restore a contemporaneous benchmark, rebuild the union basis from the *converged* Method B (full relaxation) factors and rerun TPSCI in it — the gap between that re-built union-product benchmark and Method B (full relaxation) then doubles as a convergence diagnostic (it measures the intra-block entanglement that rank growth, §6, would capture).
 
 - every level must respect the (corrected) chain above;
 - a single-FockConfig list must reproduce the plain CMF-CI energy exactly;
@@ -146,28 +146,28 @@ Existing pieces (reuse as-is or near):
 | Spin-partner FockConfig generation | `possible_spin_focksectors`, `src/core/type_FockConfig.jl` |
 | PT2 / screening patterns | TPSCI code, `src/core/tpsci_*.jl` |
 
-New pieces (all in `src/core/nocmf.jl` unless noted):
+New pieces (all in `src/core/oxci.jl` unless noted):
 
 | Function | Role |
 |---|---|
-| `nocmf_cmf_solutions` | per-FockConfig CMF-CI + parent cluster eigenbases + embedding RDMs |
+| `oxci_cmf_solutions` | per-FockConfig CMF-CI + parent cluster eigenbases + embedding RDMs |
 | `build_union_basis` (`type_ClusterBasis.jl`) | SVD-thresholded union working basis + exact parent factors |
-| `nocmf_state` | SPTstate with one Tucker block per FockConfig (`nkeep` truncates block rank) |
-| `nocmf_level0`, `nocmf_ci_solve`, `build_H_dense` | level-0 dense solve |
-| `nocmf_routeA` | union-product-space TPSCI benchmark |
-| `nocmf_optimize!`, `nocmf_level1a` | ALS sweeps via the bordered (d+1) pencil |
-| `nocmf_level1b` | residual-augmented union cycles (embedded-H residual direction) |
-| `nocmf_split_blocks`, `nocmf_optimize_blocks!`, `nocmf_rank_growth!`, `nocmf_gen_eig` | level-2 rank growth, metric-corrected ALS, canonical-orthogonalization generalized solve |
+| `oxci_state` | SPTstate with one Tucker block per FockConfig (`nkeep` truncates block rank) |
+| `oxci_solve`, `oxci_ci_solve`, `oxci_build_H` | Method A dense solve |
+| `oxci_union_benchmark` | union-product-space TPSCI benchmark |
+| `oxci_variational_sweep!`, `oxci_variational` | ALS sweeps via the bordered (d+1) pencil |
+| `oxci_variational_relax` | residual-augmented union cycles (embedded-H residual direction) |
+| `oxci_split_blocks`, `oxci_optimize_blocks!`, `oxci_rank_growth!`, `oxci_gen_eig` | Method B (rank growth) rank growth, metric-corrected ALS, canonical-orthogonalization generalized solve |
 
-Validated behavior (test/test_nocmf.jl, h8 + h12 fixtures): single-FockConfig
-limit reproduces CMF-CI to machine precision; the bound chain FCI ≤ RouteA ≤
-lvl1a ≤ lvl0 ≤ CMF holds; level-0 energies are invariant to union stacking
+Validated behavior (test/test_oxci.jl, h8 + h12 fixtures): single-FockConfig
+limit reproduces CMF-CI to machine precision; the bound chain FCI ≤ union-product benchmark ≤
+Method B (subspace relaxation) ≤ Method A ≤ CMF holds; Method A energies are invariant to union stacking
 order; ALS is monotone; on h8 (union of 2 states/sector) rank-2 growth
-saturates the union product space and lands on Route A exactly.
+saturates the union product space and lands on union-product benchmark exactly.
 
 ## 9. Open questions
 
-- Selection of the per-FockConfig TPS set at level 0: lowest-energy products vs. perturbative-coupling screening against the reference.
-- Automating the FockConfig list (CT generator? screen by PT2 estimate from a cheap level-0 pass?).
+- Selection of the per-FockConfig TPS set at Method A: lowest-energy products vs. perturbative-coupling screening against the reference.
+- Automating the FockConfig list (CT generator? screen by PT2 estimate from a cheap Method A pass?).
 - State-averaging weights and root-flipping protection during ALS.
-- Whether level-1b's basis augmentation should be per-cluster-adaptive or global per sweep.
+- Whether Method B (full relaxation)'s basis augmentation should be per-cluster-adaptive or global per sweep.

@@ -92,7 +92,7 @@ include("core/tpsci_outer.jl")
 include("core/tpsci_helpers.jl")
 include("core/tpsci.jl")
 
-include("core/nocmf.jl")
+include("core/oxci.jl")
 
 include("core/dense_inner.jl")
 include("core/dense_outer.jl")
@@ -140,20 +140,20 @@ export compute_2rdm
 export compute_2rdm_threaded
 export compute_2rdm_blas
 export build_union_basis
-export nocmf_cmf_solutions
-export nocmf_setup
-export nocmf_state
-export nocmf_ci_solve
-export nocmf_level0
-export nocmf_routeA
-export nocmf_expectation
-export nocmf_optimize!
-export nocmf_level1a
-export nocmf_level1b
-export nocmf_split_blocks
-export nocmf_blocks_H
-export nocmf_blocks_overlap
-export nocmf_gen_eig
-export nocmf_optimize_blocks!
-export nocmf_rank_growth!
+export oxci_cmf_solutions
+export oxci_setup
+export oxci_state
+export oxci_ci_solve
+export oxci_solve
+export oxci_union_benchmark
+export oxci_expectation
+export oxci_variational_sweep!
+export oxci_variational
+export oxci_variational_relax
+export oxci_split_blocks
+export oxci_blocks_H
+export oxci_blocks_overlap
+export oxci_gen_eig
+export oxci_optimize_blocks!
+export oxci_rank_growth!
 end

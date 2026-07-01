@@ -1,12 +1,13 @@
 """
-NO-CMF: non-orthogonal CMF state interaction.
+Oxidation-State CI: a CI over oxidation states (FockConfigs) with
+context-specific, per-configuration cluster bases.
 
 Solve a separate CMF-CI (fixed orbitals, no orbital optimization) for each
 FockConfig in a user-supplied list, so every FockConfig gets cluster states
 polarized by its own mean-field environment. The resulting tensor product
 states are coupled in a small CI and diagonalized.
 
-Key structural facts (see docs/src/nocmf_design.md for the full derivation):
+Key structural facts (see docs/src/oxci_design.md for the full derivation):
 
 - TPS from *different* FockConfigs are exactly orthogonal (particle number on
   at least one cluster differs), and TPS within one FockConfig are orthonormal
@@ -21,7 +22,7 @@ Key structural facts (see docs/src/nocmf_design.md for the full derivation):
 - Each FockConfig block is stored as a Tucker block of an `SPTstate` whose
   factors are that parent's states in working-basis coordinates. The existing
   SPT sigma build already forms cross-block spectator overlaps explicitly
-  (`contract_dense_H_with_state`), which is exactly what NO-CMF needs.
+  (`contract_dense_H_with_state`), which is exactly what Oxidation-State CI needs.
 
 Energy convention: like `ci_solve`, all energies returned here are electronic
 (no `ints.h0`); add `ints.h0` for totals.
@@ -31,7 +32,7 @@ using LinearAlgebra
 using OrderedCollections
 
 """
-    nocmf_cmf_solutions(ints, clusters, fock_configs; max_roots=2, dguess=nothing, verbose=0, ...)
+    oxci_cmf_solutions(ints, clusters, fock_configs; max_roots=2, dguess=nothing, verbose=0, ...)
 
 Converge a CMF-CI (no orbital optimization) for each FockConfig in
 `fock_configs` and build that parent's cluster eigenbases (restricted to the
@@ -58,7 +59,7 @@ matching the standard CMF behavior.
   (parent), inner index = cluster
 - `rdm1s::Vector{RDM1{T}}`: converged CMF embedding density per FockConfig
 """
-function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
+function oxci_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                              fock_configs::Vector{FockConfig{N}};
                              max_roots  = 2,
                              dguess     = nothing,
@@ -76,7 +77,7 @@ function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
 
     for fc in fock_configs
         fspace = [(Int(fc[i][1]), Int(fc[i][2])) for i in 1:N]
-        verbose == 0 || @printf(" nocmf: CMF-CI for FockConfig %s\n", string(fspace))
+        verbose == 0 || @printf(" oxci: CMF-CI for FockConfig %s\n", string(fspace))
 
         rdm1 = dguess === nothing ? RDM1(n_orb(ints)) : deepcopy(dguess)
         e, rdm1_dict, _ = ClusterMeanField.cmf_ci(ints, clusters, fspace, rdm1,
@@ -104,23 +105,23 @@ function nocmf_cmf_solutions(ints::InCoreInts{T}, clusters::Vector{MOCluster},
 end
 
 """
-    nocmf_setup(ints, clusters, fock_configs; max_roots=1, svd_thresh=1e-8, verbose=0, ...)
+    oxci_setup(ints, clusters, fock_configs; max_roots=1, svd_thresh=1e-8, verbose=0, ...)
 
-Run the full NO-CMF preparation pipeline: per-FockConfig CMF-CI solutions,
+Run the full Oxidation-State CI preparation pipeline: per-FockConfig CMF-CI solutions,
 union working basis + factors, ClusterOps in the working basis, and the
 clustered Hamiltonian. Returns a NamedTuple
 `(e_cmf, parent_bases, union_bases, factors, cluster_ops, clustered_ham)`.
 """
-function nocmf_setup(ints::InCoreInts{T}, clusters::Vector{MOCluster},
+function oxci_setup(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                      fock_configs::Vector{FockConfig{N}};
                      max_roots  = 1,
                      svd_thresh = 1e-8,
                      verbose    = 0,
                      kwargs...) where {T,N}
-    e_cmf, parent_bases, rdm1s = nocmf_cmf_solutions(ints, clusters, fock_configs;
+    e_cmf, parent_bases, rdm1s = oxci_cmf_solutions(ints, clusters, fock_configs;
                                                      max_roots=max_roots, verbose=verbose, kwargs...)
     union_bases, factors, recon_err = build_union_basis(parent_bases, svd_thresh=svd_thresh, verbose=verbose)
-    recon_err < 1e-6 || @warn(" nocmf_setup: union basis discards parent-state components", recon_err)
+    recon_err < 1e-6 || @warn(" oxci_setup: union basis discards parent-state components", recon_err)
     cluster_ops = compute_cluster_ops(union_bases, ints)
     clustered_ham = extract_ClusteredTerms(ints, clusters)
     return (e_cmf=e_cmf, parent_bases=parent_bases, rdm1s=rdm1s, union_bases=union_bases,
@@ -128,27 +129,27 @@ function nocmf_setup(ints::InCoreInts{T}, clusters::Vector{MOCluster},
 end
 
 """
-    nocmf_state(clusters, fock_configs, factors, union_bases; R=1, nkeep=nothing)
+    oxci_state(clusters, fock_configs, factors, union_bases; R=1, nkeep=nothing)
 
 Build an `SPTstate` with one Tucker block per FockConfig. Block `p`'s factors
 are parent `p`'s cluster states expressed in the union working basis
 (`factors[p][i][sector]`), its TuckerConfig is the full union-sector range on
 every cluster, and its core holds the CI coefficients over parent `p`'s kept
 product states. Cores are initialized to zero — set a guess with
-`set_vector!` or solve with `nocmf_ci_solve`.
+`set_vector!` or solve with `oxci_ci_solve`.
 
 `nkeep` truncates each block to the lowest `nkeep` cluster states per cluster
-(e.g. `nkeep=1` gives one TPS per FockConfig — the level-1a ansatz — while the
+(e.g. `nkeep=1` gives one TPS per FockConfig — the Method B (subspace relaxation) ansatz — while the
 union basis stays as rich as the parents allow, giving the ALS optimization
 room to rotate).
 """
-function nocmf_state(clusters::Vector{MOCluster},
+function oxci_state(clusters::Vector{MOCluster},
                      fock_configs::Vector{FockConfig{N}},
                      factors,
                      union_bases::Vector{ClusterBasis{A,T}};
                      R=1, nkeep=nothing) where {T,N,A}
     length(unique(fock_configs)) == length(fock_configs) ||
-        error("duplicate FockConfigs require the (level 2) generalized solver")
+        error("duplicate FockConfigs require the (Method B (rank growth)) generalized solver")
 
     # P spaces: the full union range for every sector present (Q is empty)
     p_spaces = Vector{ClusterSubspace}()
@@ -186,13 +187,13 @@ function nocmf_state(clusters::Vector{MOCluster},
 end
 
 """
-    build_H_dense(state::SPTstate, cluster_ops, clustered_ham; nbody=4)
+    oxci_build_H(state::SPTstate, cluster_ops, clustered_ham; nbody=4)
 
 Build the dense Hamiltonian in the space spanned by `state`'s Tucker blocks
 (core-coefficient basis) by applying `build_sigma!` to unit vectors. Intended
-for the small NO-CMF variational spaces; dimension = `length(state)`.
+for the small Oxidation-State CI variational spaces; dimension = `length(state)`.
 """
-function build_H_dense(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; nbody=4) where {T,N,R}
+function oxci_build_H(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; nbody=4) where {T,N,R}
     len = length(state)
     Hd = zeros(T, len, len)
     for q in 1:len
@@ -209,20 +210,20 @@ function build_H_dense(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; nbody
 end
 
 """
-    nocmf_ci_solve(state, cluster_ops, clustered_ham; verbose=0)
+    oxci_ci_solve(state, cluster_ops, clustered_ham; verbose=0)
 
 Diagonalize the Hamiltonian in the space spanned by `state`'s blocks (dense —
-NO-CMF spaces are small by design). Returns `(energies, state)` with the `R`
+Oxidation-State CI spaces are small by design). Returns `(energies, state)` with the `R`
 lowest roots written into `state`'s cores. Energies are electronic (no h0).
 """
-function nocmf_ci_solve(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; verbose=0, nbody=4) where {T,N,R}
-    Hd = build_H_dense(state, cluster_ops, clustered_ham, nbody=nbody)
+function oxci_ci_solve(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; verbose=0, nbody=4) where {T,N,R}
+    Hd = oxci_build_H(state, cluster_ops, clustered_ham, nbody=nbody)
     F = eigen(Hd)
     R <= length(F.values) || error("R=$R roots requested but dimension is $(length(F.values))")
     set_vector!(state, Matrix{T}(F.vectors[:, 1:R]))
     e = Vector{T}(F.values[1:R])
     if verbose > 0
-        @printf(" NO-CMF CI dimension %5i\n", length(state))
+        @printf(" Oxidation-State CI CI dimension %5i\n", length(state))
         for r in 1:R
             @printf("   root %3i  E(elec) = %16.10f\n", r, e[r])
         end
@@ -231,14 +232,14 @@ function nocmf_ci_solve(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; verb
 end
 
 """
-    nocmf_level0(ints, clusters, fock_configs; max_roots=1, R=1, svd_thresh=1e-8, verbose=0, ...)
+    oxci_solve(ints, clusters, fock_configs; max_roots=1, R=1, svd_thresh=1e-8, verbose=0, ...)
 
-Level-0 NO-CMF: fixed per-FockConfig cMF cluster states, coupled and
+Method A Oxidation-State CI: fixed per-FockConfig cMF cluster states, coupled and
 diagonalized. Returns `(energies, state, env)` where `energies` are electronic
 (add `ints.h0`), `state` is the solved `SPTstate`, and `env` is the
-`nocmf_setup` NamedTuple (reusable for Route A / level 1a).
+`oxci_setup` NamedTuple (reusable for union-product benchmark / Method B (subspace relaxation)).
 """
-function nocmf_level0(ints::InCoreInts{T}, clusters::Vector{MOCluster},
+function oxci_solve(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                       fock_configs::Vector{FockConfig{N}};
                       max_roots  = 1,
                       R          = 1,
@@ -246,19 +247,19 @@ function nocmf_level0(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                       svd_thresh = 1e-8,
                       verbose    = 0,
                       kwargs...) where {T,N}
-    env = nocmf_setup(ints, clusters, fock_configs;
+    env = oxci_setup(ints, clusters, fock_configs;
                       max_roots=max_roots, svd_thresh=svd_thresh, verbose=verbose, kwargs...)
-    state = nocmf_state(clusters, fock_configs, env.factors, env.union_bases, R=R, nkeep=nkeep)
-    e, state = nocmf_ci_solve(state, env.cluster_ops, env.clustered_ham, verbose=verbose)
+    state = oxci_state(clusters, fock_configs, env.factors, env.union_bases, R=R, nkeep=nkeep)
+    e, state = oxci_ci_solve(state, env.cluster_ops, env.clustered_ham, verbose=verbose)
     return e, state, env
 end
 
 """
-    nocmf_expectation(state::SPTstate, cluster_ops, clustered_ham; nbody=4)
+    oxci_expectation(state::SPTstate, cluster_ops, clustered_ham; nbody=4)
 
 ⟨Ψ|H|Ψ⟩/⟨Ψ|Ψ⟩ for the first root. Electronic energy (no h0).
 """
-function nocmf_expectation(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; nbody=4) where {T,N,R}
+function oxci_expectation(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; nbody=4) where {T,N,R}
     sig = deepcopy(state)
     zero!(sig)
     build_sigma!(sig, state, cluster_ops, clustered_ham, nbody=nbody, verbose=0)
@@ -268,9 +269,9 @@ function nocmf_expectation(state::SPTstate{T,N,R}, cluster_ops, clustered_ham; n
 end
 
 """
-    nocmf_optimize!(state::SPTstate, cluster_ops, clustered_ham; max_iter=50, tol=1e-8, verbose=0)
+    oxci_variational_sweep!(state::SPTstate, cluster_ops, clustered_ham; max_iter=50, tol=1e-8, verbose=0)
 
-Level-1a "resonating CMF": variationally optimize the cluster states defining
+Method B (subspace relaxation) "resonating CMF": variationally optimize the cluster states defining
 each FockConfig's TPS, restricted to the span of the union working basis, by
 ALS sweeps. Requires rank-1 blocks (one TPS per FockConfig; build the state
 with `max_roots=1`) and a single root.
@@ -289,29 +290,29 @@ the CMF-CI embedded-cluster diagonalization (in the union subspace).
 Returns the energy history (electronic, no h0), one entry per sweep, starting
 with the initial energy. Mutates `state` (factors and cores).
 """
-function nocmf_optimize!(state::SPTstate{T,N,R}, cluster_ops, clustered_ham;
+function oxci_variational_sweep!(state::SPTstate{T,N,R}, cluster_ops, clustered_ham;
                          max_iter = 50,
                          tol      = 1e-8,
                          verbose  = 0,
                          nbody    = 4) where {T,N,R}
-    R == 1 || error("nocmf_optimize! optimizes a single root (state-averaging NYI)")
+    R == 1 || error("oxci_variational_sweep! optimizes a single root (state-averaging NYI)")
 
     fcs = collect(keys(state.data))
     for fc in fcs
         length(state[fc]) == 1 || error("expected one TuckerConfig per FockConfig block")
         tuck = first(values(state[fc]))
         all(size(f, 2) == 1 for f in tuck.factors) ||
-            error("level 1a requires rank-1 blocks (build the state with max_roots=1)")
+            error("Method B (subspace relaxation) requires rank-1 blocks (build the state with max_roots=1)")
     end
 
     # ensure we start from a solved coefficient vector
     if norm(get_vector(state)) < 1e-12
-        nocmf_ci_solve(state, cluster_ops, clustered_ham, nbody=nbody)
+        oxci_ci_solve(state, cluster_ops, clustered_ham, nbody=nbody)
     end
 
     e_hist = Vector{T}()
-    push!(e_hist, T(nocmf_expectation(state, cluster_ops, clustered_ham, nbody=nbody)))
-    verbose == 0 || @printf(" NO-CMF ALS initial E(elec) = %16.10f\n", e_hist[end])
+    push!(e_hist, T(oxci_expectation(state, cluster_ops, clustered_ham, nbody=nbody)))
+    verbose == 0 || @printf(" Oxidation-State CI ALS initial E(elec) = %16.10f\n", e_hist[end])
 
     for iter in 1:max_iter
         for g in fcs
@@ -329,7 +330,7 @@ function nocmf_optimize!(state::SPTstate{T,N,R}, cluster_ops, clustered_ham;
                 probe[g][tconfig] = Tucker{T,N,1}(pcore, pfactors)
 
                 # A: embedded Hamiltonian of cluster j in block g (probe basis)
-                A = Matrix(build_H_dense(probe, cluster_ops, clustered_ham, nbody=nbody))
+                A = Matrix(oxci_build_H(probe, cluster_ops, clustered_ham, nbody=nbody))
 
                 # rest of the wavefunction (all other blocks, current coefficients)
                 # (build fresh — OrderedDict iteration breaks after delete!)
@@ -398,9 +399,9 @@ function nocmf_optimize!(state::SPTstate{T,N,R}, cluster_ops, clustered_ham;
         end
 
         # re-solve CI coefficients with fixed factors (variational; reuses blocks)
-        e, _ = nocmf_ci_solve(state, cluster_ops, clustered_ham, nbody=nbody)
+        e, _ = oxci_ci_solve(state, cluster_ops, clustered_ham, nbody=nbody)
         push!(e_hist, e[1])
-        verbose == 0 || @printf(" NO-CMF ALS sweep %3i  E(elec) = %16.10f  ΔE = %9.2e\n",
+        verbose == 0 || @printf(" Oxidation-State CI ALS sweep %3i  E(elec) = %16.10f  ΔE = %9.2e\n",
                                 iter, e_hist[end], e_hist[end] - e_hist[end-1])
         abs(e_hist[end] - e_hist[end-1]) > tol || break
     end
@@ -408,13 +409,13 @@ function nocmf_optimize!(state::SPTstate{T,N,R}, cluster_ops, clustered_ham;
 end
 
 """
-    nocmf_level1a(ints, clusters, fock_configs; svd_thresh=1e-8, max_iter=50, tol=1e-8, verbose=0, ...)
+    oxci_variational(ints, clusters, fock_configs; svd_thresh=1e-8, max_iter=50, tol=1e-8, verbose=0, ...)
 
-Level-1a NO-CMF: level 0 (one TPS per FockConfig) followed by ALS factor
+Method B (subspace relaxation) Oxidation-State CI: Method A (one TPS per FockConfig) followed by ALS factor
 optimization within the union working basis. Returns `(e_hist, state, env)`;
 energies electronic (no h0).
 """
-function nocmf_level1a(ints::InCoreInts{T}, clusters::Vector{MOCluster},
+function oxci_variational(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                        fock_configs::Vector{FockConfig{N}};
                        max_roots  = 4,
                        svd_thresh = 1e-8,
@@ -424,18 +425,18 @@ function nocmf_level1a(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                        kwargs...) where {T,N}
     # union built from max_roots states per parent (optimization room);
     # the variational blocks keep one TPS per FockConfig (nkeep=1)
-    e0, state, env = nocmf_level0(ints, clusters, fock_configs;
+    e0, state, env = oxci_solve(ints, clusters, fock_configs;
                                   max_roots=max_roots, nkeep=1, R=1,
                                   svd_thresh=svd_thresh, verbose=verbose, kwargs...)
-    e_hist = nocmf_optimize!(state, env.cluster_ops, env.clustered_ham;
+    e_hist = oxci_variational_sweep!(state, env.cluster_ops, env.clustered_ham;
                              max_iter=max_iter, tol=tol, verbose=verbose)
     return e_hist, state, env
 end
 
 """
-    nocmf_level1b(ints, clusters, fock_configs; max_roots=4, cycles=3, res_thresh=1e-5, ...)
+    oxci_variational_relax(ints, clusters, fock_configs; max_roots=4, cycles=3, res_thresh=1e-5, ...)
 
-Level-1b: alternate (i) level-1a ALS in the current union working basis with
+Method B (full relaxation): alternate (i) Method B (subspace relaxation) ALS in the current union working basis with
 (ii) augmentation of the union by residual directions computed in each
 cluster's determinant basis, until the residuals fall below `res_thresh` or
 `cycles` is exhausted. The union span only grows and the converged factors are
@@ -449,10 +450,10 @@ fully variationally). Clusters whose determinant dimension exceeds `max_dim_H`
 are skipped.
 
 Returns `(e_hist, state, union_bases)`; energies electronic (no h0). Note the
-final union basis differs from the level-0/1a one — Route A on the *initial*
+final union basis differs from the Method A/1a one — union-product benchmark on the *initial*
 union no longer bounds these energies (design doc §7).
 """
-function nocmf_level1b(ints::InCoreInts{T}, clusters::Vector{MOCluster},
+function oxci_variational_relax(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                        fock_configs::Vector{FockConfig{N}};
                        max_roots  = 4,
                        cycles     = 3,
@@ -463,7 +464,7 @@ function nocmf_level1b(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                        max_dim_H  = 5000,
                        verbose    = 0,
                        kwargs...) where {T,N}
-    e_cmf, parent_bases, rdm1s = nocmf_cmf_solutions(ints, clusters, fock_configs;
+    e_cmf, parent_bases, rdm1s = oxci_cmf_solutions(ints, clusters, fock_configs;
                                                      max_roots=max_roots, verbose=verbose, kwargs...)
     clustered_ham = extract_ClusteredTerms(ints, clusters)
 
@@ -481,7 +482,7 @@ function nocmf_level1b(ints::InCoreInts{T}, clusters::Vector{MOCluster},
         union_bases, factors, _ = build_union_basis(stack, svd_thresh=svd_thresh, verbose=verbose)
         cluster_ops = compute_cluster_ops(union_bases, ints)
 
-        state = nocmf_state(clusters, fock_configs, factors, union_bases, R=1, nkeep=1)
+        state = oxci_state(clusters, fock_configs, factors, union_bases, R=1, nkeep=1)
         if x_det !== nothing
             # resume exactly from the previous cycle's converged factors
             for (p, fc) in enumerate(fock_configs)
@@ -497,7 +498,7 @@ function nocmf_level1b(ints::InCoreInts{T}, clusters::Vector{MOCluster},
             end
         end
 
-        eh = nocmf_optimize!(state, cluster_ops, clustered_ham,
+        eh = oxci_variational_sweep!(state, cluster_ops, clustered_ham,
                              max_iter=max_iter, tol=tol, verbose=verbose)
         append!(e_hist, eh)
 
@@ -544,7 +545,7 @@ function nocmf_level1b(ints::InCoreInts{T}, clusters::Vector{MOCluster},
                 have_res = true
             end
         end
-        verbose == 0 || @printf(" NO-CMF 1b cycle %2i  E(elec) = %16.10f  max residual = %9.2e\n",
+        verbose == 0 || @printf(" Oxidation-State CI 1b cycle %2i  E(elec) = %16.10f  max residual = %9.2e\n",
                                 cycle, e_hist[end], maxres)
         maxres > res_thresh || break
     end
@@ -552,7 +553,7 @@ function nocmf_level1b(ints::InCoreInts{T}, clusters::Vector{MOCluster},
 end
 
 #####################################################################
-# Level 2: rank growth via repeated FockConfigs (generalized solve)
+# Method B (rank growth): rank growth via repeated FockConfigs (generalized solve)
 #
 # The wavefunction is a list of rank-1 blocks (single-FockConfig SPTstates with
 # unit cores) plus a coefficient vector. FockConfigs may repeat; same-FockConfig
@@ -579,12 +580,12 @@ function _single_block_state(template::SPTstate{T,N,R}, fc::FockConfig{N}, tc::T
 end
 
 """
-    nocmf_split_blocks(state::SPTstate{T,N,1})
+    oxci_split_blocks(state::SPTstate{T,N,1})
 
-Split a rank-1-block NO-CMF state into a list of normalized single-block basis
+Split a rank-1-block Oxidation-State CI state into a list of normalized single-block basis
 states (cores set to 1) and the corresponding coefficient vector.
 """
-function nocmf_split_blocks(state::SPTstate{T,N,1}) where {T,N}
+function oxci_split_blocks(state::SPTstate{T,N,1}) where {T,N}
     blocks = Vector{SPTstate{T,N,1}}()
     coeffs = Vector{T}()
     for (fc, tdict) in state.data
@@ -599,12 +600,12 @@ function nocmf_split_blocks(state::SPTstate{T,N,1}) where {T,N}
 end
 
 """
-    nocmf_blocks_overlap(blocks)
+    oxci_blocks_overlap(blocks)
 
 Overlap matrix between rank-1 basis blocks. Different FockConfigs → exactly 0;
 same FockConfig → product of cluster factor overlaps.
 """
-function nocmf_blocks_overlap(blocks::Vector{SPTstate{T,N,1}}) where {T,N}
+function oxci_blocks_overlap(blocks::Vector{SPTstate{T,N,1}}) where {T,N}
     nb = length(blocks)
     S = Matrix{T}(I, nb, nb)
     for a in 1:nb, b in a+1:nb
@@ -622,11 +623,11 @@ function nocmf_blocks_overlap(blocks::Vector{SPTstate{T,N,1}}) where {T,N}
 end
 
 """
-    nocmf_blocks_H(blocks, cluster_ops, clustered_ham; nbody=4)
+    oxci_blocks_H(blocks, cluster_ops, clustered_ham; nbody=4)
 
 Hamiltonian matrix between rank-1 basis blocks (electronic, no h0).
 """
-function nocmf_blocks_H(blocks::Vector{SPTstate{T,N,1}}, cluster_ops, clustered_ham; nbody=4) where {T,N}
+function oxci_blocks_H(blocks::Vector{SPTstate{T,N,1}}, cluster_ops, clustered_ham; nbody=4) where {T,N}
     nb = length(blocks)
     H = zeros(T, nb, nb)
     for a in 1:nb, b in a:nb
@@ -644,14 +645,14 @@ function _block_H_element(a::SPTstate{T,N,1}, b::SPTstate{T,N,1}, cluster_ops, c
 end
 
 """
-    nocmf_gen_eig(H, S; lindep_thresh=1e-9)
+    oxci_gen_eig(H, S; lindep_thresh=1e-9)
 
 Generalized symmetric eigenproblem by canonical orthogonalization: overlap
 eigenvectors with eigenvalue below `lindep_thresh` are projected out. Returns
 `(values, vectors, ndropped)` with vectors in the original (non-orthogonal)
 block coordinates, normalized C'SC = 1.
 """
-function nocmf_gen_eig(H::Matrix{T}, S::Matrix{T}; lindep_thresh=1e-9) where T
+function oxci_gen_eig(H::Matrix{T}, S::Matrix{T}; lindep_thresh=1e-9) where T
     F = eigen(Symmetric(S))
     keep = findall(F.values .> lindep_thresh)
     length(keep) > 0 || error("overlap matrix numerically singular")
@@ -661,11 +662,11 @@ function nocmf_gen_eig(H::Matrix{T}, S::Matrix{T}; lindep_thresh=1e-9) where T
 end
 
 """
-    nocmf_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
+    oxci_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
                            active=eachindex(blocks), max_iter=20, tol=1e-8, ...)
 
 Metric-corrected ALS over a list of rank-1 blocks with possibly repeated
-FockConfigs. Identical to `nocmf_optimize!` except the bordered pencil's metric
+FockConfigs. Identical to `oxci_variational_sweep!` except the bordered pencil's metric
 gains the probe–rest overlap coupling `s_q = ⟨probe_q|rest⟩` (nonzero when other
 blocks share the FockConfig of the block being updated), and the outer CI
 re-solve is generalized. Updates with a near-singular metric are skipped.
@@ -673,7 +674,7 @@ re-solve is generalized. Updates with a near-singular metric are skipped.
 `active` restricts which blocks are optimized (e.g. only a freshly added one).
 Mutates `blocks` and `coeffs`; returns the per-sweep energy history.
 """
-function nocmf_optimize_blocks!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
+function oxci_optimize_blocks!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
                                 cluster_ops, clustered_ham;
                                 active        = eachindex(blocks),
                                 max_iter      = 20,
@@ -684,14 +685,14 @@ function nocmf_optimize_blocks!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{
     nb = length(blocks)
     nb == length(coeffs) || throw(DimensionMismatch)
 
-    H = nocmf_blocks_H(blocks, cluster_ops, clustered_ham, nbody=nbody)
-    S = nocmf_blocks_overlap(blocks)
-    e, C, _ = nocmf_gen_eig(H, S, lindep_thresh=lindep_thresh)
+    H = oxci_blocks_H(blocks, cluster_ops, clustered_ham, nbody=nbody)
+    S = oxci_blocks_overlap(blocks)
+    e, C, _ = oxci_gen_eig(H, S, lindep_thresh=lindep_thresh)
     coeffs .= C[:, 1]
 
     e_hist = Vector{T}()
     push!(e_hist, e[1])
-    verbose == 0 || @printf(" NO-CMF blocks ALS initial E(elec) = %16.10f\n", e_hist[end])
+    verbose == 0 || @printf(" Oxidation-State CI blocks ALS initial E(elec) = %16.10f\n", e_hist[end])
 
     for iter in 1:max_iter
         for bidx in active
@@ -705,7 +706,7 @@ function nocmf_optimize_blocks!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{
                 pcore = (zeros(T, ntuple(i -> i == j ? d : 1, N)),)
                 probe = _single_block_state(blocks[bidx], fcg, tcg, Tucker{T,N,1}(pcore, pfactors))
 
-                A = Matrix(build_H_dense(probe, cluster_ops, clustered_ham, nbody=nbody))
+                A = Matrix(oxci_build_H(probe, cluster_ops, clustered_ham, nbody=nbody))
 
                 v = zeros(T, d)
                 sv = zeros(T, d)
@@ -764,15 +765,15 @@ function nocmf_optimize_blocks!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{
                 H[bidx, b2] = _block_H_element(blocks[bidx], blocks[b2], cluster_ops, clustered_ham, nbody=nbody)
                 H[b2, bidx] = H[bidx, b2]
             end
-            Srow = nocmf_blocks_overlap(blocks)
+            Srow = oxci_blocks_overlap(blocks)
             S[bidx, :] .= Srow[bidx, :]
             S[:, bidx] .= Srow[:, bidx]
         end
 
-        e, C, ndrop = nocmf_gen_eig(H, S, lindep_thresh=lindep_thresh)
+        e, C, ndrop = oxci_gen_eig(H, S, lindep_thresh=lindep_thresh)
         coeffs .= C[:, 1]
         push!(e_hist, e[1])
-        verbose == 0 || @printf(" NO-CMF blocks ALS sweep %3i  E(elec) = %16.10f  ΔE = %9.2e  (S dropped %i)\n",
+        verbose == 0 || @printf(" Oxidation-State CI blocks ALS sweep %3i  E(elec) = %16.10f  ΔE = %9.2e  (S dropped %i)\n",
                                 iter, e_hist[end], e_hist[end] - e_hist[end-1], ndrop)
         abs(e_hist[end] - e_hist[end-1]) > tol || break
     end
@@ -780,10 +781,10 @@ function nocmf_optimize_blocks!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{
 end
 
 """
-    nocmf_rank_growth!(blocks, coeffs, cluster_ops, clustered_ham;
+    oxci_rank_growth!(blocks, coeffs, cluster_ops, clustered_ham;
                        add=nothing, max_iter=20, tol=1e-8, verbose=0, ...)
 
-Level-2 greedy rank growth: for each FockConfig in `add` (default: each block's
+Method B (rank growth) greedy rank growth: for each FockConfig in `add` (default: each block's
 FockConfig once), append a second rank-1 block in that FockConfig — initialized
 from the existing block with its largest-dimension cluster factor replaced by an
 orthogonal direction in the union span — then ALS-optimize the new block with
@@ -793,7 +794,7 @@ solve.
 
 Returns the energy history across additions. Mutates `blocks`/`coeffs`.
 """
-function nocmf_rank_growth!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
+function oxci_rank_growth!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
                             cluster_ops, clustered_ham;
                             add           = nothing,
                             max_iter      = 20,
@@ -814,7 +815,7 @@ function nocmf_rank_growth!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
         ds = [size(tk.factors[i], 1) for i in 1:N]
         j = argmax(ds)
         if ds[j] == 1
-            verbose == 0 || @printf(" nocmf_rank_growth!: no room to grow FockConfig %s — skipped\n", string(fc))
+            verbose == 0 || @printf(" oxci_rank_growth!: no room to grow FockConfig %s — skipped\n", string(fc))
             continue
         end
         x = tk.factors[j][:, 1]
@@ -833,11 +834,11 @@ function nocmf_rank_growth!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
         push!(coeffs, zero(T))
 
         # optimize the new block with the others frozen, then a global polish
-        eh = nocmf_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
+        eh = oxci_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
                                     active=[length(blocks)], max_iter=max_iter, tol=tol,
                                     lindep_thresh=lindep_thresh, verbose=verbose, nbody=nbody)
         append!(e_hist, eh)
-        eh = nocmf_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
+        eh = oxci_optimize_blocks!(blocks, coeffs, cluster_ops, clustered_ham;
                                     max_iter=max_iter, tol=tol,
                                     lindep_thresh=lindep_thresh, verbose=verbose, nbody=nbody)
         append!(e_hist, eh)
@@ -846,15 +847,15 @@ function nocmf_rank_growth!(blocks::Vector{SPTstate{T,N,1}}, coeffs::Vector{T},
 end
 
 """
-    nocmf_routeA(clusters, fock_configs, union_bases, cluster_ops, clustered_ham; nroots=1)
+    oxci_union_benchmark(clusters, fock_configs, union_bases, cluster_ops, clustered_ham; nroots=1)
 
 Benchmark: standard TPSCI over the *full product space* of the union working
 basis, restricted to the listed FockConfigs. Variationally contains every
-NO-CMF state whose factors lie in the union span (level 0 and level 1a), so
+Oxidation-State CI state whose factors lie in the union span (Method A and Method B (subspace relaxation)), so
 its energy is a lower bound for those. Dense build — small systems only.
 Returns `(energies, tpsci_state)`; energies are electronic (no h0).
 """
-function nocmf_routeA(clusters::Vector{MOCluster},
+function oxci_union_benchmark(clusters::Vector{MOCluster},
                       fock_configs::Vector{FockConfig{N}},
                       union_bases::Vector{ClusterBasis{A,T}},
                       cluster_ops, clustered_ham;
