@@ -85,49 +85,37 @@ Build the standard local operator tables used by TPSCI. This intentionally
 does not build the expensive local spin-free 2-RDM table `Ppqsr`; use
 `compute_cluster_ops_2rdm` when calling `compute_2rdm`.
 """
-function compute_cluster_ops(cluster_bases, ints::InCoreInts{T}) where {T}
+function _compute_cluster_ops_for_cluster(cb, ints::InCoreInts{T}; verbose=1) where {T}
 #={{{=#
-    clusters = Vector{MOCluster}()
-    for ci in cluster_bases
-        push!(clusters, ci.cluster)
-    end
-    
-    cluster_ops = Vector{ClusterOps{T}}()
-    for ci in clusters
-        push!(cluster_ops, ClusterOps(ci, T=T)) 
-    end
+        ci = cb.cluster
+        ops = ClusterOps(ci, T=T)
 
-
-    for ci in clusters
-
-        display(ci)
+        verbose < 1 || display(ci)
         flush(stdout)
-
-        cb = cluster_bases[ci.idx]
        
-        cluster_ops[ci.idx]["H"] = TPSChem.tdm_H(cb, subset(ints, ci.orb_list), verbose=0) 
-        cluster_ops[ci.idx]["A"], cluster_ops[ci.idx]["a"] = TPSChem.tdm_A(cb,"alpha") 
-        cluster_ops[ci.idx]["B"], cluster_ops[ci.idx]["b"] = TPSChem.tdm_A(cb,"beta")
-        cluster_ops[ci.idx]["AA"], cluster_ops[ci.idx]["aa"] = TPSChem.tdm_AA(cb,"alpha") 
-        cluster_ops[ci.idx]["BB"], cluster_ops[ci.idx]["bb"] = TPSChem.tdm_AA(cb,"beta") 
-        cluster_ops[ci.idx]["Aa"] = TPSChem.tdm_Aa(cb,"alpha") 
-        cluster_ops[ci.idx]["Bb"] = TPSChem.tdm_Aa(cb,"beta") 
-        cluster_ops[ci.idx]["Ab"], cluster_ops[ci.idx]["Ba"] = TPSChem.tdm_Ab(cb) 
+        ops["H"] = TPSChem.tdm_H(cb, subset(ints, ci.orb_list), verbose=0)
+        ops["A"], ops["a"] = TPSChem.tdm_A(cb,"alpha")
+        ops["B"], ops["b"] = TPSChem.tdm_A(cb,"beta")
+        ops["AA"], ops["aa"] = TPSChem.tdm_AA(cb,"alpha")
+        ops["BB"], ops["bb"] = TPSChem.tdm_AA(cb,"beta")
+        ops["Aa"] = TPSChem.tdm_Aa(cb,"alpha")
+        ops["Bb"] = TPSChem.tdm_Aa(cb,"beta")
+        ops["Ab"], ops["Ba"] = TPSChem.tdm_Ab(cb)
         # remove BA and ba account for these terms 
-        cluster_ops[ci.idx]["AB"], cluster_ops[ci.idx]["ba"], cluster_ops[ci.idx]["BA"], cluster_ops[ci.idx]["ab"] = TPSChem.tdm_AB(cb)
-        cluster_ops[ci.idx]["AAa"], cluster_ops[ci.idx]["Aaa"] = TPSChem.tdm_AAa(cb,"alpha")
-        cluster_ops[ci.idx]["BBb"], cluster_ops[ci.idx]["Bbb"] = TPSChem.tdm_AAa(cb,"beta")
-        cluster_ops[ci.idx]["ABa"], cluster_ops[ci.idx]["Aba"] = TPSChem.tdm_ABa(cb,"alpha")
-        cluster_ops[ci.idx]["ABb"], cluster_ops[ci.idx]["Bba"] = TPSChem.tdm_ABa(cb,"beta")
-        #cluster_ops[ci.idx]["ABa"], cluster_ops[ci.idx]["Aba"], cluster_ops[ci.idx]["BAa"], cluster_ops[ci.idx]["Aab"] = TPSChem.tdm_ABa(cb,"alpha")
-        #cluster_ops[ci.idx]["ABb"], cluster_ops[ci.idx]["Bba"], cluster_ops[ci.idx]["BAb"], cluster_ops[ci.idx]["Bab"] = TPSChem.tdm_ABa(cb,"beta")
+        ops["AB"], ops["ba"], ops["BA"], ops["ab"] = TPSChem.tdm_AB(cb)
+        ops["AAa"], ops["Aaa"] = TPSChem.tdm_AAa(cb,"alpha")
+        ops["BBb"], ops["Bbb"] = TPSChem.tdm_AAa(cb,"beta")
+        ops["ABa"], ops["Aba"] = TPSChem.tdm_ABa(cb,"alpha")
+        ops["ABb"], ops["Bba"] = TPSChem.tdm_ABa(cb,"beta")
+        #ops["ABa"], ops["Aba"], ops["BAa"], ops["Aab"] = TPSChem.tdm_ABa(cb,"alpha")
+        #ops["ABb"], ops["Bba"], ops["BAb"], ops["Bab"] = TPSChem.tdm_ABa(cb,"beta")
        
         # spin operators
         
         #
         # S+
         op = Dict{Tuple,Array}()
-        for (fock,mat) in cluster_ops[ci.idx]["Ab"]
+        for (fock,mat) in ops["Ab"]
             dims = size(mat)
             op[fock] = zeros(dims[2:4]...)
             for j in 1:dims[4]
@@ -138,12 +126,12 @@ function compute_cluster_ops(cluster_bases, ints::InCoreInts{T}) where {T}
                 end
             end
         end
-        cluster_ops[ci.idx]["S+"] = op
+        ops["S+"] = op
         
         #
         # S-
         op = Dict{Tuple,Array}()
-        for (fock,mat) in cluster_ops[ci.idx]["Ba"]
+        for (fock,mat) in ops["Ba"]
             dims = size(mat)
             op[fock] = zeros(dims[2:4]...)
             for j in 1:dims[4]
@@ -154,7 +142,7 @@ function compute_cluster_ops(cluster_bases, ints::InCoreInts{T}) where {T}
                 end
             end
         end
-        cluster_ops[ci.idx]["S-"] = op
+        ops["S-"] = op
         
         #
         # Sz
@@ -169,12 +157,12 @@ function compute_cluster_ops(cluster_bases, ints::InCoreInts{T}) where {T}
             op[focktrans] = reshape(op[focktrans],1,size(op[focktrans],1),size(op[focktrans],2))
 
         end
-        cluster_ops[ci.idx]["Sz"] = op
+        ops["Sz"] = op
 
 
         #
         # S2
-        cluster_ops[ci.idx]["S2"] = TPSChem.tdm_S2(cb, subset(ints, ci.orb_list), verbose=0) 
+        ops["S2"] = TPSChem.tdm_S2(cb, subset(ints, ci.orb_list), verbose=0)
 
 
         to_delete = [
@@ -206,8 +194,8 @@ function compute_cluster_ops(cluster_bases, ints::InCoreInts{T}) where {T}
                      #"bb"
                      ]
         for op in to_delete
-            for (ftran,array) in cluster_ops[ci.idx][op]
-                cluster_ops[ci.idx][op][ftran] .*= 0
+            for (ftran,array) in ops[op]
+                ops[op][ftran] .*= 0
             end
         end
 
@@ -215,25 +203,44 @@ function compute_cluster_ops(cluster_bases, ints::InCoreInts{T}) where {T}
         # Compute single excitation operator
         tmp = Dict{Tuple,Array}()
         for (fock,basis) in cb
-            tmp[(fock,fock)] = (cluster_ops[ci.idx]["Aa"][(fock,fock)] + cluster_ops[ci.idx]["Bb"][(fock,fock)])
+            tmp[(fock,fock)] = (ops["Aa"][(fock,fock)] + ops["Bb"][(fock,fock)])
         end
-        cluster_ops[ci.idx]["E1"] = tmp 
+        ops["E1"] = tmp
 
         
 
         #
         # reshape data into 3index quantities: e.g., (pqr, I, J)
-        for opstring in keys(cluster_ops[ci.idx])
+        for opstring in keys(ops)
             opstring != "H" || continue
             opstring != "S2" || continue
-            for ftrans in keys(cluster_ops[ci.idx][opstring])
-                data = cluster_ops[ci.idx][opstring][ftrans]
+            for ftrans in keys(ops[opstring])
+                data = ops[opstring][ftrans]
                 dim1 = prod(size(data)[1:(length(size(data))-2)])
                 dim2 = size(data)[length(size(data))-1]
                 dim3 = size(data)[length(size(data))-0]
-                cluster_ops[ci.idx][opstring][ftrans] = copy(reshape(data, (dim1,dim2,dim3)))
+                ops[opstring][ftrans] = copy(reshape(data, (dim1,dim2,dim3)))
             end
         end
+    return ops
+end
+    #=}}}=#
+
+function compute_cluster_ops(cluster_bases, ints::InCoreInts{T}) where {T}
+#={{{=#
+    clusters = Vector{MOCluster}()
+    for ci in cluster_bases
+        push!(clusters, ci.cluster)
+    end
+
+    cluster_ops = Vector{ClusterOps{T}}(undef, length(clusters))
+    for ci in clusters
+        cluster_ops[ci.idx] = _compute_cluster_ops_for_cluster(cluster_bases[ci.idx], ints)
+        # Each cluster's build churns far more than it retains (the FCI kernels
+        # allocate large working tensors that do not end up in the returned
+        # dicts), so reclaim that before starting the next cluster rather than
+        # letting it pile up until Julia's incremental GC gets to it on its own.
+        GC.gc(false)
     end
     return cluster_ops
 end
@@ -281,7 +288,104 @@ function compute_cluster_ops_2rdm(cluster_bases, ints::InCoreInts{T}) where {T}
 end
 
 
-    """
+"""
+    _tdm_build_concurrency()
+
+Number of fock-space transitions to build *at once* during the cluster-operator
+build -- independent of `Threads.nthreads()`.
+
+Each transition in flight holds a large transient tensor (a 3-body operator on
+an 11-orbital cluster is ~0.4 GB at M=200) while the FCI kernel underneath
+computes it, on top of the arrays it returns.  Handing every one of the node's
+Julia threads a transition at once, as the first version of this did, bounds
+final retained memory correctly but not *peak* memory: it can have as many of
+those transients live simultaneously as there are threads, which is a real
+difference from the serial build this replaced -- one transition's garbage at a
+time there, GC keeping pace.
+
+Defaulting to a smaller number of concurrent transitions keeps that peak
+bounded while still using the whole node: the freed core budget goes to BLAS
+instead (`_ops_build_blas_threads` divides by this same cap), and the chunk
+functions call `GC.gc(false)` between clusters to reclaim what each cluster's build
+churned before the next one starts.  Override with `TPSCHEM_OPS_BUILD_THREADS`.
+"""
+function _tdm_build_concurrency()
+    v = get(ENV, "TPSCHEM_OPS_BUILD_THREADS", "")
+    n = tryparse(Int, v)
+    cap = (n === nothing || n < 1) ? 16 : n
+    return clamp(cap, 1, Threads.nthreads())
+end
+
+"""
+    _tdm_thread_map(jobs, f)
+
+Apply `f` to each element of `jobs`, running at most `_tdm_build_concurrency()`
+of them at once, and return the results in `jobs` order.
+
+Measured on real cluster data at 8 threads, three ways of bounding concurrency
+below `length(jobs)` all cost about the same, and all cost more than the
+original unbounded `Threads.@threads for i in eachindex(jobs)`: pulling jobs
+one at a time from a shared atomic counter (720s vs a 549s baseline), fixed
+round-robin chunks run with explicit `:static` scheduling (669s), and the same
+chunks run with `:dynamic` (671s, matching bare `Threads.@threads`'s default
+since Julia 1.8). The three are close enough to each other, and far enough from
+the baseline, that the gap is evidently in the *chunking* itself rather than in
+which scheduler runs the chunks -- the exact mechanism is not identified.
+
+Since the cost is in chunking, not in the concurrency limit itself, the fix is
+to only pay it when the cap actually binds: when `_tdm_build_concurrency() >=
+length(jobs)`, every "chunk" would hold exactly one job anyway, so this skips
+straight to the plain per-item loop that measured 549s. Chunking only engages
+when there are genuinely more jobs than the cap allows in flight -- the regime
+this whole cap exists for (transitions per builder can be several times the
+default cap of 16), and the one this file's tests have not been able to
+reproduce on an 8-thread laptop where the cap never binds below `nthreads()`.
+"""
+function _tdm_thread_map(jobs::Vector, f)
+    n = length(jobs)
+    n == 0 && return Any[]
+    vals = Vector{Any}(undef, n)
+    cap = _tdm_build_concurrency()
+    if cap >= n
+        Threads.@threads for i in 1:n
+            vals[i] = f(jobs[i])
+        end
+        return vals
+    end
+    chunks = [Int[] for _ in 1:cap]
+    for i in 1:n
+        push!(chunks[mod1(i, cap)], i)
+    end
+    Threads.@threads for c in 1:cap
+        for i in chunks[c]
+            vals[i] = f(jobs[i])
+        end
+    end
+    return vals
+end
+
+"""
+    _tdm_fock_pairs(cb, offset, range)
+
+Collect the `(bra, ket)` fock-sector pairs a tdm builder will actually touch.
+Separating enumeration from computation is what lets the expensive part be
+threaded; the `haskey` guard is the same one the serial loops applied inline.
+"""
+function _tdm_fock_pairs(cb, offset::Tuple{Int,Int}, range)
+    jobs = Tuple{Tuple{Int,Int},Tuple{Int,Int}}[]
+    for na in range
+        for nb in range
+            fockket = (na, nb)
+            fockbra = (na + offset[1], nb + offset[2])
+            if haskey(cb, fockbra) && haskey(cb, fockket)
+                push!(jobs, (fockbra, fockket))
+            end
+        end
+    end
+    return jobs
+end
+
+"""
     tdm_H(cb::ClusterBasis; verbose=0)
 
 Compute local Hamiltonian `<s|H|t>` between all cluster states, `s` and `t` 
@@ -299,12 +403,16 @@ function tdm_H(cb::ClusterBasis, ints; verbose=0)
     #
     # loop over fock-space transitions
     verbose == 0 || display(cb.cluster)
-    for (fock,basis) in cb
+    focks = collect(keys(cb.basis))
+    vals = _tdm_thread_map(focks, function (fock)
+                               basis = cb[fock]
+                               Hmap = LinearMap(ints, basis.ansatz)
+                               return cb[fock]' * Matrix((Hmap * cb[fock]))
+                           end)
+    for (i, fock) in enumerate(focks)
         focktrans = (fock,fock)
-        verbose == 0 || display(basis.ansatz)
-        Hmap = LinearMap(ints, basis.ansatz)
-
-        dicti[focktrans] = cb[fock]' * Matrix((Hmap * cb[fock]))
+        verbose == 0 || display(cb[fock].ansatz)
+        dicti[focktrans] = vals[i]
 
         if verbose > 0
             for e in 1:size(cb[fock],2)
@@ -329,11 +437,15 @@ function tdm_S2(cb::ClusterBasis, ints; verbose=0)
     #
     # loop over fock-space transitions
     verbose == 0 || display(cb.cluster)
-    for (fock,basis) in cb
+    focks = collect(keys(cb.basis))
+    vals = _tdm_thread_map(focks, function (fock)
+                               basis = cb[fock]
+                               return cb[fock]' * apply_S2_matrix(basis.ansatz, cb[fock].vectors)
+                           end)
+    for (i, fock) in enumerate(focks)
         focktrans = (fock,fock)
-        verbose == 0 || display(basis.ansatz)
-
-        dicti[focktrans] = cb[fock]' * apply_S2_matrix(basis.ansatz, cb[fock].vectors)
+        verbose == 0 || display(cb[fock].ansatz)
+        dicti[focktrans] = vals[i]
 
         if verbose > 0
             for e in 1:size(cb[fock],2)
@@ -364,34 +476,20 @@ function tdm_A(cb::ClusterBasis, spin_case; verbose=0)
     dicti_adj = Dict{Tuple,Array}()
     #
     # loop over fock-space transitions
-    for na in 0:norbs
-        for nb in 0:norbs
-            fockbra = ()
-            if spin_case == "alpha"
-                fockbra = (na+1,nb)
-            elseif spin_case == "beta"
-                fockbra = (na,nb+1)
-            else
-                throw(DomainError(spin_case))
-            end
-            fockket = (na,nb)
-            focktrans = (fockbra,fockket)
-            focktrans_adj = (fockket,fockbra)
-
-            if haskey(cb, fockbra) && haskey(cb, fockket)
-                basis_bra = cb[fockbra]
-                basis_ket = cb[fockket]
-                if spin_case == "alpha"
-                    dicti[focktrans] = compute_operator_c_a(basis_bra, basis_ket)
-                else
-                    dicti[focktrans] = compute_operator_c_b(basis_bra, basis_ket)
-                end
-                # adjoint 
-                basis_bra = cb[fockket]
-                basis_ket = cb[fockbra]
-                dicti_adj[focktrans_adj] =  permutedims(dicti[focktrans], [1,3,2])
-            end
-        end
+    spin_case in ("alpha", "beta") || throw(DomainError(spin_case))
+    jobs = _tdm_fock_pairs(cb, spin_case == "alpha" ? (1,0) : (0,1), 0:norbs)
+    vals = _tdm_thread_map(jobs, function (job)
+                               basis_bra = cb[job[1]]
+                               basis_ket = cb[job[2]]
+                               d = spin_case == "alpha" ?
+                                   compute_operator_c_a(basis_bra, basis_ket) :
+                                   compute_operator_c_b(basis_bra, basis_ket)
+                               return (d, permutedims(d, [1,3,2]))
+                           end)
+    for (i, job) in enumerate(jobs)
+        fockbra, fockket = job
+        dicti[(fockbra,fockket)] = vals[i][1]
+        dicti_adj[(fockket,fockbra)] = vals[i][2]
     end
     return dicti, dicti_adj
 #=}}}=#
@@ -416,35 +514,20 @@ function tdm_AA(cb::ClusterBasis, spin_case; verbose=0)
     dicti_adj = Dict{Tuple,Array}()
     #
     # loop over fock-space transitions
-    for na in 0:norbs
-        for nb in 0:norbs
-            fockbra = ()
-            if spin_case == "alpha"
-                fockbra = (na+2,nb)
-            elseif spin_case == "beta"
-                fockbra = (na,nb+2)
-            else
-                throw(DomainError(spin_case))
-            end
-
-            fockket = (na,nb)
-            focktrans = (fockbra,fockket)
-            focktrans_adj = (fockket,fockbra)
-
-            if haskey(cb, fockbra) && haskey(cb, fockket)
-                basis_bra = cb[fockbra]
-                basis_ket = cb[fockket]
-                if spin_case == "alpha"
-                    dicti[focktrans] = compute_operator_cc_aa(basis_bra, basis_ket)
-                else
-                    dicti[focktrans] = compute_operator_cc_bb(basis_bra, basis_ket)
-                end
-                # adjoint 
-                basis_bra = cb[fockket]
-                basis_ket = cb[fockbra]
-                dicti_adj[focktrans_adj] =  permutedims(dicti[focktrans], [2,1,4,3])
-            end
-        end
+    spin_case in ("alpha", "beta") || throw(DomainError(spin_case))
+    jobs = _tdm_fock_pairs(cb, spin_case == "alpha" ? (2,0) : (0,2), 0:norbs)
+    vals = _tdm_thread_map(jobs, function (job)
+                               basis_bra = cb[job[1]]
+                               basis_ket = cb[job[2]]
+                               d = spin_case == "alpha" ?
+                                   compute_operator_cc_aa(basis_bra, basis_ket) :
+                                   compute_operator_cc_bb(basis_bra, basis_ket)
+                               return (d, permutedims(d, [2,1,4,3]))
+                           end)
+    for (i, job) in enumerate(jobs)
+        fockbra, fockket = job
+        dicti[(fockbra,fockket)] = vals[i][1]
+        dicti_adj[(fockket,fockbra)] = vals[i][2]
     end
     return dicti, dicti_adj
 #=}}}=#
@@ -468,23 +551,17 @@ function tdm_Aa(cb::ClusterBasis, spin_case; verbose=0)
     dicti = Dict{Tuple,Array}()
     #
     # loop over fock-space transitions
-    for na in 0:norbs
-        for nb in 0:norbs
-            fockbra = (na,nb)
-
-            fockket = (na,nb)
-            focktrans = (fockbra,fockket)
-
-            if haskey(cb, fockbra) && haskey(cb, fockket)
-                basis_bra = cb[fockbra]
-                basis_ket = cb[fockket]
-                if spin_case == "alpha"
-                    dicti[focktrans] = compute_operator_ca_aa(basis_bra, basis_ket)
-                else
-                    dicti[focktrans] = compute_operator_ca_bb(basis_bra, basis_ket)
-                end
-            end
-        end
+    spin_case in ("alpha", "beta") || throw(DomainError(spin_case))
+    jobs = _tdm_fock_pairs(cb, (0,0), 0:norbs)
+    vals = _tdm_thread_map(jobs, function (job)
+                               basis_bra = cb[job[1]]
+                               basis_ket = cb[job[2]]
+                               return spin_case == "alpha" ?
+                                      compute_operator_ca_aa(basis_bra, basis_ket) :
+                                      compute_operator_ca_bb(basis_bra, basis_ket)
+                           end)
+    for (i, job) in enumerate(jobs)
+        dicti[(job[1],job[2])] = vals[i]
     end
     return dicti
 #=}}}=#
@@ -510,25 +587,17 @@ function tdm_Ab(cb::ClusterBasis; verbose=0)
     dicti_adj = Dict{Tuple,Array}()
     #
     # loop over fock-space transitions
-    for na in -1:norbs+1
-        for nb in -1:norbs+1
-            fockbra = (na+1,nb-1)
-
-            fockket = (na,nb)
-            focktrans = (fockbra,fockket)
-            focktrans_adj = (fockket,fockbra)
-
-            if haskey(cb, fockbra) && haskey(cb, fockket)
-                basis_bra = cb[fockbra]
-                basis_ket = cb[fockket]
-                dicti[focktrans] = compute_operator_ca_ab(basis_bra, basis_ket)
-                
-                # adjoint 
-                basis_bra = cb[fockket]
-                basis_ket = cb[fockbra]
-                dicti_adj[focktrans_adj] =  permutedims(dicti[focktrans], [2,1,4,3])
-            end
-        end
+    jobs = _tdm_fock_pairs(cb, (1,-1), -1:norbs+1)
+    vals = _tdm_thread_map(jobs, function (job)
+                               basis_bra = cb[job[1]]
+                               basis_ket = cb[job[2]]
+                               d = compute_operator_ca_ab(basis_bra, basis_ket)
+                               return (d, permutedims(d, [2,1,4,3]))
+                           end)
+    for (i, job) in enumerate(jobs)
+        fockbra, fockket = job
+        dicti[(fockbra,fockket)] = vals[i][1]
+        dicti_adj[(fockket,fockbra)] = vals[i][2]
     end
     return dicti, dicti_adj
 #=}}}=#
@@ -556,25 +625,21 @@ function tdm_AB(cb::ClusterBasis; verbose=0)
     dictj_adj = Dict{Tuple,Array}()
     #
     # loop over fock-space transitions
-    for na in -2:norbs+2
-        for nb in -2:norbs+2
-            fockbra = (na+1,nb+1)
-
-            fockket = (na,nb)
-            focktrans = (fockbra,fockket)
-            focktrans_adj = (fockket,fockbra)
-
-            if haskey(cb, fockbra) && haskey(cb, fockket)
-                basis_bra = cb[fockbra]
-                basis_ket = cb[fockket]
-                dicti[focktrans] = compute_operator_cc_ab(basis_bra, basis_ket)
-                dictj[focktrans] = -permutedims(dicti[focktrans], [2,1,3,4])
-                
-                # adjoint 
-                dicti_adj[focktrans_adj] =  permutedims(dicti[focktrans], [2,1,4,3])
-                dictj_adj[focktrans_adj] =  permutedims(dictj[focktrans], [2,1,4,3])
-            end
-        end
+    jobs = _tdm_fock_pairs(cb, (1,1), -2:norbs+2)
+    vals = _tdm_thread_map(jobs, function (job)
+                               basis_bra = cb[job[1]]
+                               basis_ket = cb[job[2]]
+                               di = compute_operator_cc_ab(basis_bra, basis_ket)
+                               dj = -permutedims(di, [2,1,3,4])
+                               return (di, permutedims(di, [2,1,4,3]),
+                                       dj, permutedims(dj, [2,1,4,3]))
+                           end)
+    for (i, job) in enumerate(jobs)
+        fockbra, fockket = job
+        dicti[(fockbra,fockket)]     = vals[i][1]
+        dicti_adj[(fockket,fockbra)] = vals[i][2]
+        dictj[(fockbra,fockket)]     = vals[i][3]
+        dictj_adj[(fockket,fockbra)] = vals[i][4]
     end
     return dicti, dicti_adj, dictj, dictj_adj
 #=}}}=#
@@ -599,35 +664,20 @@ function tdm_AAa(cb::ClusterBasis, spin_case; verbose=0)
     dicti_adj = Dict{Tuple,Array}()
     #
     # loop over fock-space transitions
-    for na in 0:norbs
-        for nb in 0:norbs
-            fockbra = ()
-            if spin_case == "alpha"
-                fockbra = (na+1,nb)
-            elseif spin_case == "beta"
-                fockbra = (na,nb+1)
-            else
-                throw(DomainError(spin_case))
-            end
-
-            fockket = (na,nb)
-            focktrans = (fockbra,fockket)
-            focktrans_adj = (fockket,fockbra)
-
-            if haskey(cb, fockbra) && haskey(cb, fockket)
-                basis_bra = cb[fockbra]
-                basis_ket = cb[fockket]
-                if spin_case == "alpha"
-                    dicti[focktrans] = compute_operator_cca_aaa(basis_bra, basis_ket)
-                else
-                    dicti[focktrans] = compute_operator_cca_bbb(basis_bra, basis_ket)
-                end
-                # adjoint 
-                basis_bra = cb[fockket]
-                basis_ket = cb[fockbra]
-                dicti_adj[focktrans_adj] =  permutedims(dicti[focktrans], [3,2,1,5,4])
-            end
-        end
+    spin_case in ("alpha", "beta") || throw(DomainError(spin_case))
+    jobs = _tdm_fock_pairs(cb, spin_case == "alpha" ? (1,0) : (0,1), 0:norbs)
+    vals = _tdm_thread_map(jobs, function (job)
+                               basis_bra = cb[job[1]]
+                               basis_ket = cb[job[2]]
+                               d = spin_case == "alpha" ?
+                                   compute_operator_cca_aaa(basis_bra, basis_ket) :
+                                   compute_operator_cca_bbb(basis_bra, basis_ket)
+                               return (d, permutedims(d, [3,2,1,5,4]))
+                           end)
+    for (i, job) in enumerate(jobs)
+        fockbra, fockket = job
+        dicti[(fockbra,fockket)] = vals[i][1]
+        dicti_adj[(fockket,fockbra)] = vals[i][2]
     end
     return dicti, dicti_adj
 #=}}}=#
@@ -637,10 +687,20 @@ end
 """
     tdm_ABa(cb::ClusterBasis, spin_case; verbose=0)
 
-Compute `<s|p'q'r|t>` between all cluster states, `s` and `t` 
+Compute `<s|p'q'r|t>` between all cluster states, `s` and `t`
 from accessible sectors of a cluster's fock space.
 - `spin_case`: alpha or beta
 Returns `Dict[((na,nb),(na,nb))] => Array`
+
+Only `(dicti, dicti_adj)` are returned. An earlier version also built `dictj`
+(`= -permutedims(dicti, ...)`) and its adjoint, but `_compute_cluster_ops_for_cluster`
+-- the only caller -- has only ever kept two of the four return values
+(`ops["ABa"], ops["Aba"] = tdm_ABa(...)`); Julia's tuple destructuring silently
+drops extra values rather than erroring, so `dictj`/`dictj_adj` were computed in
+full (one `permutedims` and one negation per fock transition, each the same
+size as `dicti`) and then immediately discarded. That doubled both the transient
+memory live during the build and the wall time spent on this builder for no
+retained benefit -- removed here since nothing has ever read them.
 """
 function tdm_ABa(cb::ClusterBasis, spin_case; verbose=0)
     #={{{=#
@@ -650,48 +710,26 @@ function tdm_ABa(cb::ClusterBasis, spin_case; verbose=0)
 
     dicti = Dict{Tuple,Array}()
     dicti_adj = Dict{Tuple,Array}()
-    dictj = Dict{Tuple,Array}()
-    dictj_adj = Dict{Tuple,Array}()
     #
     # loop over fock-space transitions
-    for na in -2:norbs+2
-        for nb in -2:norbs+2
-            fockbra = ()
-            if spin_case == "alpha"
-                fockbra = (na,nb+1)
-            elseif spin_case == "beta"
-                fockbra = (na+1,nb)
-            else
-                throw(DomainError(spin_case))
-            end
-
-            fockket = (na,nb)
-            focktrans = (fockbra,fockket)
-            focktrans_adj = (fockket,fockbra)
-
-            if haskey(cb, fockbra) && haskey(cb, fockket)
-                basis_bra = cb[fockbra]
-                basis_ket = cb[fockket]
-                if spin_case == "alpha"
-                    dicti[focktrans]     = compute_operator_cca_aba(basis_bra, basis_ket)
-                    dictj[focktrans] = -permutedims(dicti[focktrans], [2,1,3,4,5])
-                elseif spin_case == "beta"
-                    dicti[focktrans]     = compute_operator_cca_abb(basis_bra, basis_ket)
-                    dictj[focktrans] = -permutedims(dicti[focktrans], [2,1,3,4,5])
-                else
-                    error("Wrong spin_case: ",spin_case)
-                end
-
-                # adjoint 
-                basis_bra = cb[fockket]
-                basis_ket = cb[fockbra]
-
-                dicti_adj[focktrans_adj] =  permutedims(dicti[focktrans], [3,2,1,5,4])
-                dictj_adj[focktrans_adj] =  permutedims(dictj[focktrans], [3,2,1,5,4])
-            end
-        end
+    spin_case in ("alpha", "beta") || throw(DomainError(spin_case))
+    # NB: the spin -> sector offset here is the reverse of tdm_A/tdm_AAa --
+    # "alpha" raises nb and "beta" raises na.  Preserved from the serial loop.
+    jobs = _tdm_fock_pairs(cb, spin_case == "alpha" ? (0,1) : (1,0), -2:norbs+2)
+    vals = _tdm_thread_map(jobs, function (job)
+                               basis_bra = cb[job[1]]
+                               basis_ket = cb[job[2]]
+                               di = spin_case == "alpha" ?
+                                    compute_operator_cca_aba(basis_bra, basis_ket) :
+                                    compute_operator_cca_abb(basis_bra, basis_ket)
+                               return (di, permutedims(di, [3,2,1,5,4]))
+                           end)
+    for (i, job) in enumerate(jobs)
+        fockbra, fockket = job
+        dicti[(fockbra,fockket)]     = vals[i][1]
+        dicti_adj[(fockket,fockbra)] = vals[i][2]
     end
-    return dicti, dicti_adj, dictj, dictj_adj
+    return dicti, dicti_adj
     #=}}}=#
 end
 
@@ -702,11 +740,8 @@ end
 
 Add effective local hamiltonians (local CASCI) type hamiltonians to a `ClusterOps` type for each `Cluster'
 """
-function add_cmf_operators!(ops, bases, ints, Da, Db; verbose=0)
+function _add_cmf_operator_for_cluster!(ops_i, cb, ints, Da, Db; verbose=0)
     #={{{=#
-    n_clusters = length(bases)
-    for ci_idx in 1:n_clusters
-        cb = bases[ci_idx]
         ci = cb.cluster
         verbose == 0 || println()
         verbose == 0 || display(ci)
@@ -721,12 +756,16 @@ function add_cmf_operators!(ops, bases, ints, Da, Db; verbose=0)
         #
         # loop over fock-space transitions
         verbose == 0 || display(cb.cluster)
-        for (fock,basis) in cb
+        focks = collect(keys(cb.basis))
+        vals = _tdm_thread_map(focks, function (fock)
+                                   basis = cb[fock]
+                                   Hmap = LinearMap(ints_i, basis.ansatz)
+                                   return cb[fock]' * Matrix((Hmap * cb[fock]))
+                               end)
+        for (i, fock) in enumerate(focks)
             focktrans = (fock,fock)
-            verbose == 0 || display(basis.ansatz)
-            Hmap = LinearMap(ints_i, basis.ansatz)
-
-            dicti[focktrans] = cb[fock]' * Matrix((Hmap * cb[fock]))
+            verbose == 0 || display(cb[fock].ansatz)
+            dicti[focktrans] = vals[i]
 
             if verbose > 0
                 for e in 1:size(cb[fock],2)
@@ -734,7 +773,18 @@ function add_cmf_operators!(ops, bases, ints, Da, Db; verbose=0)
                 end
             end
         end
-        ops[ci.idx]["Hcmf"] = dicti
+        ops_i["Hcmf"] = dicti
+    return ops_i
+end
+#=}}}=#
+
+function add_cmf_operators!(ops, bases, ints, Da, Db; verbose=0)
+    #={{{=#
+    n_clusters = length(bases)
+    for ci_idx in 1:n_clusters
+        _add_cmf_operator_for_cluster!(ops[ci_idx], bases[ci_idx], ints, Da, Db,
+                                       verbose=verbose)
+        GC.gc(false)
     end
     return 
 end

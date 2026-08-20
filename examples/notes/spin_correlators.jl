@@ -17,11 +17,11 @@ Usage:
   julia spin_correlators.jl 26                # 26-orbital system
 """
 
-using QCBase
+using TPSChem.QCBase
 using TPSChem
 using NPZ
-using InCoreIntegrals
-using RDM
+using TPSChem.InCoreIntegrals
+using TPSChem.RDM
 using JLD2
 using Printf
 using LinearAlgebra
@@ -49,6 +49,10 @@ println("Computing 1-RDM spin flip parts")
 display(γ_ab[:,:,1,1])
 display(γ_ba[:,:,1,1])
 println("Computing 2-RDM")
+if any(!haskey(ops, "Ppqsr") for ops in cluster_ops)
+    println(" Building spin-free 2-RDM operator tables Ppqsr...")
+    TPSChem.add_spinfree_2rdm_ops!(cluster_ops, cluster_bases)
+end
 Γ = TPSChem.compute_2rdm(v0a, cluster_ops)
 display(Γ[:,:,:,:,1,1])
 n_orb   = size(γ_aa, 1)

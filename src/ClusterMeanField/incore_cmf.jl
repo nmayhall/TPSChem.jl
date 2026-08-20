@@ -322,6 +322,7 @@ function cmf_oo(ints::InCoreInts{T}, clusters::Vector{MOCluster}, fspace, dguess
                 verbose=0, 
                 method="bfgs", 
                 alpha=nothing,
+                use_pyscf=true,
                 sequential=false) where T
     norb = size(ints.h1)[1]
 
@@ -353,7 +354,8 @@ function cmf_oo(ints::InCoreInts{T}, clusters::Vector{MOCluster}, fspace, dguess
         e, rdm1_dict, _ = cmf_ci(ints_tmp, clusters, fspace, orbital_rotation(d1_curr, U), 
                                          tol_d1=gconv/10.0, 
                                          verbose=0, 
-                                         sequential=sequential)
+                                         sequential=sequential,
+                                         use_pyscf=use_pyscf)
         
         d1_tmp = assemble_full_rdm(clusters, rdm1_dict)
         d1_tmp = orbital_rotation(d1_tmp, U')
@@ -742,6 +744,7 @@ function cmf_oo_diis(ints_in::InCoreInts{T}, clusters::Vector{MOCluster}, fspace
                     diis_start      = 1,
                     alpha           = .1,
                     zero_intra_rots = true,
+                    use_pyscf      = true,
                     sequential      = false
     ) where T
     #={{{=#
@@ -772,6 +775,7 @@ function cmf_oo_diis(ints_in::InCoreInts{T}, clusters::Vector{MOCluster}, fspace
                                          tol_d1     = tol_d1, 
                                          tol_ci     = tol_ci, 
                                          verbose    = 0, 
+                                         use_pyscf  = use_pyscf,
                                          sequential = sequential)
         d1_i, d2_i = assemble_full_rdm(clusters, rdm1_dict, rdm2_dict)
         
@@ -1414,6 +1418,18 @@ function cmf_oo_diis(ints_in::InCoreInts{T}, clusters::Vector{MOCluster}, fspace
     #=}}}=#
 end
 
+"""
+    cmf_oo_newton(ints, clusters, fspace, ansatze, dguess::RDM1; kwargs...)
+    cmf_oo_newton(ints, clusters, fspace, dguess::RDM1; kwargs...)
+
+Cluster mean-field (CMF) orbital optimization using a Newton solver that uses
+both the (analytically computed) orbital gradient and Hessian. Alternates
+cluster CI solves with Newton steps on the orbital-rotation parameters until the
+orbital gradient (`tol_oo`), 1-RDM (`tol_d1`), and CI (`tol_ci`) are converged.
+Pass `zero_intra_rots=true` to freeze intra-cluster rotations. Returns
+`(e_cmf, U, d1)`: the CMF energy, the orbital-rotation unitary, and the
+converged 1-RDM.
+"""
 function cmf_oo_newton(ints_in::InCoreInts{T}, clusters::Vector{MOCluster}, fspace, ansatze::Vector{<:Ansatz}, dguess::RDM1{T};
                     maxiter_oo      = 100,
                     maxiter_ci      = 100,

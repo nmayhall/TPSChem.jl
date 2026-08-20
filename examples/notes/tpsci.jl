@@ -1,8 +1,8 @@
-using QCBase
+using TPSChem.QCBase
 using TPSChem
 using NPZ
-using InCoreIntegrals
-using RDM
+using TPSChem.InCoreIntegrals
+using TPSChem.RDM
 using JLD2
 using Printf
 using LinearAlgebra
@@ -273,6 +273,10 @@ end
 # 2-RDM and Exchange Coupling
 # ==============================================================================
 println("\n Computing 2-RDM and exchange coupling constants J_IJ...")
+if any(!haskey(ops, "Ppqsr") for ops in cluster_ops)
+    println(" Building spin-free 2-RDM operator tables Ppqsr...")
+    TPSChem.add_spinfree_2rdm_ops!(cluster_ops, cluster_bases)
+end
 Γ=TPSChem.compute_2rdm_blas(v0a, cluster_ops)
 # Γ = TPSChem.compute_2rdm(v0a, cluster_ops)
 
