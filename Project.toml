@@ -1,7 +1,7 @@
 name = "TPSChem"
 uuid = "8a527d8e-86ef-4adf-a42d-3ee05015c8b0"
-authors = ["Nick Mayhall <nmayhall@gmail.com> and contributors"]
 version = "0.1.0"
+authors = ["Nick Mayhall <nmayhall@gmail.com> and contributors"]
 
 [deps]
 Arpack = "7d9fca2a-8960-54d3-9f78-7d1dccf2cb97"
@@ -50,7 +50,7 @@ LinearOperators = "2"
 LoopVectorization = "0.12"
 NPZ = "0.4.3"
 Optim = "1, 2"
-OrderedCollections = "1"
+OrderedCollections = "1, 2"
 Parameters = "0.12"
 PyCall = "1"
 StaticArrays = "1"
